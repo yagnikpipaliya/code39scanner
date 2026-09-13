@@ -28,9 +28,9 @@ decoding, written in TypeScript and shipped as standard ES modules with type def
 - **Robust decoding.** Local adaptive thresholding (uneven lighting, shadows), sub-pixel edge
   detection (low resolution, blur), tolerance for print gain, perspective and tilt. It reads
   barcodes upside-down and in either orientation, and finds several barcodes per frame.
-- **Confirmed reads.** A value is reported only after independent scanlines agree on it and,
-  when scanning live, after it appears in two consecutive frames, so one-off misreads are never
-  reported.
+- **Confirmed reads.** A value is reported only after independent scanlines agree on it, so
+  one-off misreads are not reported. Live scanning can additionally require the value in several
+  recent frames.
 - **Efficient.** Each camera frame is drawn once and only the sampled scanlines are read back.
 - **Production-grade lifecycle.** Rear-camera preference, camera switching, serialized and
   cancellable start/stop, pausing in background tabs, and automatic shutdown on unrecoverable
@@ -82,10 +82,10 @@ document.getElementById('start').addEventListener('click', () => scanner.start()
 
 ### Live camera scanning
 
-Each barcode is reported **once per appearance**, as soon as it has been decoded in
-`minFrameConfirmations` consecutive frames (2 by default, about 100 ms). A barcode that stays in
-view is not repeated. If it leaves the view for longer than `presenceTimeoutMs` and returns, it
-is reported again.
+Each barcode is reported **once per appearance**, on the first frame that decodes it (or, with
+`minFrameConfirmations`, once enough recent frames have). A barcode that stays in view is not
+repeated. If it leaves the view for longer than `presenceTimeoutMs` and returns, it is reported
+again.
 
 ```js
 const scanner = new Code39Scanner({
@@ -143,7 +143,7 @@ Every error thrown or emitted by the package extends `Code39ScannerError` and ha
 `code`. Branch on the code, not on the message or the class name:
 
 ```js
-import { Code39ScannerError, ErrorCode, ScannerEvent } from 'code39-scanner';
+import { Code39ScannerError, ErrorCode, ScannerEvent, ScannerState } from 'code39-scanner';
 
 try {
   await scanner.start();
@@ -160,8 +160,12 @@ try {
   }
 }
 
-// Failures while scanning (e.g. the camera was unplugged).
-scanner.on(ScannerEvent.Error, (error) => showMessage(`${error.code}: ${error.message}`));
+// Failures while scanning. If the scanner is still scanning, the error was recoverable
+// (e.g. one bad frame); otherwise scanning has stopped (e.g. the camera was unplugged).
+scanner.on(ScannerEvent.Error, (error) => {
+  const recoverable = scanner.state === ScannerState.Scanning;
+  showMessage(`${error.code}: ${error.message}`, { persistent: !recoverable });
+});
 ```
 
 ## API reference
@@ -172,20 +176,20 @@ scanner.on(ScannerEvent.Error, (error) => showMessage(`${error.code}: ${error.me
 new Code39Scanner(options: Code39ScannerOptions)
 ```
 
-| Option                  | Type                | Default | Description                                                                                     |
-| ----------------------- | ------------------- | ------- | ----------------------------------------------------------------------------------------------- |
-| `video`                 | `HTMLVideoElement`  | —       | Element showing the camera preview. Required unless `frameSource` is given.                     |
-| `frameSource`           | `FrameSource`       | camera  | Custom frame provider that replaces the built-in camera.                                        |
-| `fullAscii`             | `boolean`           | `false` | Expand Full ASCII shift sequences. See [Full ASCII](#full-ascii).                               |
-| `minLength`             | `number`            | `1`     | Minimum number of data characters.                                                              |
-| `minQuietZone`          | `number`            | `5`     | Required blank margin on each side, in narrow-bar widths (the spec requires 10).                |
-| `scanLines`             | `number`            | `24`    | Primary scanlines sampled per orientation per frame.                                            |
-| `orientations`          | `ScanOrientation[]` | both    | Scan directions.                                                                                |
-| `minConfirmations`      | `number`            | `2`     | Independent scanlines that must agree before a value is reported.                               |
-| `minFrameConfirmations` | `number`            | `2`     | Consecutive frames that must decode a value before it is reported (`1` reports on first sight). |
-| `scanIntervalMs`        | `number`            | `100`   | Minimum delay between frame decodes.                                                            |
-| `presenceTimeoutMs`     | `number`            | `1500`  | Time a barcode must be out of view before it is reported again.                                 |
-| `maxFrameSize`          | `number`            | `1920`  | Frames are downscaled so their longest side is at most this many pixels.                        |
+| Option                  | Type                | Default | Description                                                                            |
+| ----------------------- | ------------------- | ------- | -------------------------------------------------------------------------------------- |
+| `video`                 | `HTMLVideoElement`  | —       | Element showing the camera preview. Required unless `frameSource` is given.            |
+| `frameSource`           | `FrameSource`       | camera  | Custom frame provider that replaces the built-in camera.                               |
+| `fullAscii`             | `boolean`           | `false` | Expand Full ASCII shift sequences. See [Full ASCII](#full-ascii).                      |
+| `minLength`             | `number`            | `1`     | Minimum number of data characters.                                                     |
+| `minQuietZone`          | `number`            | `5`     | Required blank margin on each side, in narrow-bar widths (the spec requires 10).       |
+| `scanLines`             | `number`            | `24`    | Primary scanlines sampled per orientation per frame.                                   |
+| `orientations`          | `ScanOrientation[]` | both    | Scan directions.                                                                       |
+| `minConfirmations`      | `number`            | `2`     | Independent scanlines that must agree before a value is reported.                      |
+| `minFrameConfirmations` | `number`            | `1`     | Frames, out of the last 10, that must decode a value before it is reported (up to 10). |
+| `scanIntervalMs`        | `number`            | `100`   | Minimum delay between frame decodes.                                                   |
+| `presenceTimeoutMs`     | `number`            | `1500`  | Time a barcode must be out of view before it is reported again.                        |
+| `maxFrameSize`          | `number`            | `1920`  | Frames are downscaled so their longest side is at most this many pixels.               |
 
 Invalid options throw `InvalidOptionsError` from the constructor.
 
@@ -215,8 +219,10 @@ listener calls `stop()` or `dispose()`, no further events of that frame are deli
 for example from a camera that is still warming up, are simply skipped. Scanning stops
 automatically in two cases: the error cannot be fixed by retrying (unsupported browser, camera
 unavailable or disconnected, or a frame source producing invalid frames), or 5 frames in a row
-fail. The failure is reported once in either case. Timing uses a monotonic clock, so changes to
-the system time cannot cause duplicate or missed reports.
+fail. The failure is reported once in either case. When an `Error` event arrives, `state` tells
+the two apart: still `scanning` means the error was recoverable, `idle` means scanning stopped.
+Timing uses a monotonic clock, so changes to the system time cannot cause duplicate or missed
+reports.
 
 ### `Code39ImageDecoder` and `decodeImage`
 
@@ -299,7 +305,7 @@ For custom pipelines the package also exports:
 - `Code39WidthDecoder`: turns bar/space widths into text; `decodeSymbols` also returns each
   symbol's module (narrow-bar) width.
 - `expandFullAscii`, `toGrayscale` and `toLuminanceSource`.
-- `PresenceTracker`: the once-per-appearance and consecutive-frame confirmation logic.
+- `PresenceTracker`: the once-per-appearance and frame-confirmation logic.
 - `CameraFrameSource`: the camera implementation of `FrameSource`.
 
 ## How it works
@@ -311,18 +317,21 @@ camera frame ──► drawn once to a canvas
              ──► per line: luminance ─► adaptive threshold ─► sub-pixel bar/space widths
              ──► width decoder: characters, start/stop "*", quiet zones, both directions
              ──► confirmation by independent scanlines (walking along the bars)
-             ──► confirmation across frames ─► presence tracker ─► Detect event
+             ──► optional confirmation across frames ─► presence tracker ─► Detect event
 ```
 
 **Confirmation.** A value must be decoded by `minConfirmations` scanlines that are at least three
 narrow-bar widths apart. That is close enough for a tilted barcode to fit, and far enough that a
 pattern decoding on a single pixel row (sensor noise, a stroke of text) is not confirmed by its
-immediate neighbours. Labels with the same text but different sizes are confirmed separately.
-When a scanline decodes a value, the decoder walks along the bars in both directions until the
-value stops decoding, so a barcode crossed by a single sampled line still confirms. When scanning
-live, the value must also appear in `minFrameConfirmations` consecutive frames, which carry
-independent sensor noise and differently placed scanlines. Frame confirmation counts frames, not
-time, so it works with any `presenceTimeoutMs`.
+immediate neighbours. Lines that measure one barcode slightly differently (tilt, blur) count
+together; labels with the same text but clearly different sizes are confirmed separately. When a
+scanline decodes a value, the decoder walks along the bars in both directions until the value
+stops decoding, so a barcode crossed by a single sampled line still confirms.
+
+When scanning live, `minFrameConfirmations` can additionally require the value in that many of
+the last 10 frames (`FRAME_CONFIRMATION_WINDOW`). Misses in between do not reset the count, so
+small barcodes that the moving scanlines cross only in some frames still confirm, and it counts
+frames rather than time, so it works with any `presenceTimeoutMs`.
 
 **Source layout.** `src/core` holds the symbology table, width decoder and Full ASCII.
 `src/image` holds luminance sources, the binarizer and the image decoder. `src/camera` holds the
