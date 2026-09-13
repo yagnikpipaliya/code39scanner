@@ -35,6 +35,11 @@ const ERROR_MESSAGES = Object.freeze({
     `${error.message} Check that a camera is connected and not in use by another app.`,
 });
 
+/** A start cancelled by a later stop (e.g. the page was hidden) is expected, not a failure. */
+/** @param {unknown} error */
+const isCancellation = (error) =>
+  error instanceof Code39ScannerError && error.code === ErrorCode.OperationCancelled;
+
 /** @param {unknown} error @returns {string} */
 function describeError(error) {
   if (error instanceof Code39ScannerError) {
@@ -73,7 +78,7 @@ async function start(deviceId) {
     await scanner.start({ deviceId });
   } catch (error) {
     controls.resetCameras();
-    status.show(describeError(error), StatusTone.Error);
+    if (!isCancellation(error)) status.show(describeError(error), StatusTone.Error);
     return;
   }
   await refreshCameraList();

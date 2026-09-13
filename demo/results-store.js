@@ -1,10 +1,12 @@
 /**
  * Scan history persisted in localStorage. Newest entries first and capped in size.
  *
- * - Every write re-reads storage first, so tabs never overwrite each other's scans.
- * - Changes made in other tabs are picked up through the `storage` event.
- * - Unavailable storage (private mode, blocked, quota) degrades to in-memory history, and
- *   corrupted data is ignored.
+ * - While storage mirrors this tab's history, every write re-reads it first, so tabs never
+ *   overwrite each other's scans; changes from other tabs arrive through the `storage` event.
+ * - When storage cannot hold the history (unavailable, blocked, quota exceeded), the in-memory
+ *   history stays authoritative, so nothing already shown is lost. Saving is retried on every
+ *   change and storage becomes the shared source again once a save succeeds.
+ * - Corrupted stored data is ignored.
  *
  * @typedef {{ readonly id: string, readonly text: string, readonly timestamp: number }} StoredResult
  * @typedef {(results: readonly StoredResult[]) => void} ResultsListener
@@ -48,6 +50,8 @@ export class ResultsStore {
   #storage;
   /** @type {readonly StoredResult[]} */
   #results = EMPTY;
+  /** Whether storage currently holds exactly this tab's history. */
+  #inSync = false;
   /** @type {Set<ResultsListener>} */
   #listeners = new Set();
 
@@ -55,14 +59,19 @@ export class ResultsStore {
   #onStorage = (event) => {
     // `key` is null when another tab cleared all of storage.
     if (event.key !== STORAGE_KEY && event.key !== null) return;
-    this.#results = this.#read();
+    const stored = this.#readStorage();
+    if (!stored) return;
+    this.#results = stored;
+    this.#inSync = true;
     this.#notify();
   };
 
   /** @param {Storage | null} [storage] */
   constructor(storage = getLocalStorage()) {
     this.#storage = storage;
-    this.#results = this.#read();
+    const stored = this.#readStorage();
+    this.#results = stored ?? EMPTY;
+    this.#inSync = stored !== null;
     globalThis.addEventListener?.('storage', this.#onStorage);
   }
 
@@ -74,7 +83,9 @@ export class ResultsStore {
   /** @param {{ text: string, timestamp: number }} result @returns {StoredResult} */
   add({ text, timestamp }) {
     const entry = Object.freeze({ id: createId(), text, timestamp });
-    this.#write([entry, ...this.#read()]);
+    // Merge onto the shared history only while storage mirrors ours; otherwise ours is newer.
+    const base = (this.#inSync && this.#readStorage()) || this.#results;
+    this.#write([entry, ...base]);
     return entry;
   }
 
@@ -94,13 +105,13 @@ export class ResultsStore {
     this.#listeners.clear();
   }
 
-  /** Latest persisted history; falls back to the in-memory copy when storage is unusable. */
-  /** @returns {readonly StoredResult[]} */
-  #read() {
-    if (!this.#storage) return this.#results;
+  /** Persisted history, or `null` when storage is unusable or holds corrupted data. */
+  /** @returns {readonly StoredResult[] | null} */
+  #readStorage() {
+    if (!this.#storage) return null;
     try {
       const parsed = JSON.parse(this.#storage.getItem(STORAGE_KEY) ?? '[]');
-      if (!Array.isArray(parsed)) return EMPTY;
+      if (!Array.isArray(parsed)) return null;
       return Object.freeze(
         parsed
           .filter(isStoredResult)
@@ -108,19 +119,28 @@ export class ResultsStore {
           .map((entry) => Object.freeze(entry)),
       );
     } catch {
-      return this.#results;
+      return null;
     }
   }
 
   /** @param {readonly StoredResult[]} results */
   #write(results) {
     this.#results = Object.freeze(results.slice(0, MAX_RESULTS));
-    try {
-      this.#storage?.setItem(STORAGE_KEY, JSON.stringify(this.#results));
-    } catch (error) {
-      console.warn('Scan history could not be saved.', error);
-    }
+    this.#inSync = this.#persist(this.#results);
     this.#notify();
+  }
+
+  /** @param {readonly StoredResult[]} results @returns {boolean} Whether the save succeeded. */
+  #persist(results) {
+    if (!this.#storage) return false;
+    try {
+      this.#storage.setItem(STORAGE_KEY, JSON.stringify(results));
+      return true;
+    } catch (error) {
+      if (this.#inSync)
+        console.warn('Scan history could not be saved; keeping it in memory.', error);
+      return false;
+    }
   }
 
   #notify() {
