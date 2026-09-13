@@ -156,6 +156,34 @@ describe('CameraFrameSource', () => {
     expect(getUserMedia).not.toHaveBeenCalled();
   });
 
+  it('falls back to a regular canvas when OffscreenCanvas has no 2D context', async () => {
+    vi.stubGlobal(
+      'OffscreenCanvas',
+      class {
+        getContext() {
+          return null;
+        }
+      },
+    );
+    const drawImage = vi.fn();
+    const context = {
+      canvas: { width: 0, height: 0 },
+      drawImage,
+      getImageData: (_x: number, _y: number, width: number, height: number) => ({
+        data: new Uint8ClampedArray(width * height * 4),
+      }),
+    };
+    vi.stubGlobal('document', { createElement: () => ({ getContext: () => context }) });
+    stubMediaDevices(async () => fakeStream().stream);
+
+    expect(CameraFrameSource.isSupported()).toBe(true);
+    const video = Object.assign(fakeVideo(), { readyState: 4, videoWidth: 64, videoHeight: 48 });
+    const source = new CameraFrameSource(asVideo(video));
+    await source.start();
+    expect(source.grabFrame()?.width).toBe(64);
+    expect(drawImage).toHaveBeenCalledOnce();
+  });
+
   it('plays the rear camera in the video element and releases it on stop', async () => {
     const { stream, track } = fakeStream('rear');
     const getUserMedia = vi.fn(async () => stream);

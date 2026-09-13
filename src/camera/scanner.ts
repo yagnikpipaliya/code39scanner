@@ -53,7 +53,11 @@ export interface Code39ScannerOptions extends ScannerOptions {
 const LINE_PHASE_STEP = (Math.sqrt(5) - 1) / 2;
 const INITIAL_LINE_PHASE = 0.5;
 
-/** Consecutive failed frames tolerated before scanning stops; isolated glitches recover. */
+/**
+ * Consecutive failed frames tolerated before scanning stops; isolated glitches recover. Only
+ * processed frames count: ticks without a frame (hidden page, camera not ready) neither fail nor
+ * reset the count.
+ */
 const MAX_CONSECUTIVE_FRAME_FAILURES = 5;
 /**
  * Errors that retrying the next frame cannot fix: missing browser support, a lost camera, or a
@@ -87,7 +91,8 @@ const isDocumentHidden = (): boolean =>
  *
  * Lifecycle calls are serialized, so rapid or overlapping calls (e.g. double clicks) cannot
  * leave the camera in an inconsistent state. `stop()` and `dispose()` additionally take effect
- * immediately: they cancel a `start()` that is still pending (e.g. on a permission prompt).
+ * immediately: a `start()` that is still pending (e.g. on a permission prompt) is cancelled, and
+ * whatever it acquires later is released at once.
  */
 export class Code39Scanner {
   /** Whether the browser offers everything camera scanning needs. */
@@ -195,7 +200,8 @@ export class Code39Scanner {
   stop(): Promise<void> {
     this.#generation++;
     this.#cancelTick();
-    // Releasing the source now also aborts an in-flight camera request (a permission prompt).
+    // Releasing the source invalidates an in-flight camera request. A permission prompt that is
+    // already open cannot be closed by the page, but a stream it grants later is released at once.
     this.#source.stop();
     return this.#serialize(async () => this.#halt());
   }
@@ -258,8 +264,7 @@ export class Code39Scanner {
 
     const startedAt = monotonicClock();
     try {
-      this.#scanFrame();
-      this.#consecutiveFailures = 0;
+      if (this.#scanFrame()) this.#consecutiveFailures = 0;
     } catch (thrown) {
       const error = toScannerError(thrown);
       this.#consecutiveFailures++;
@@ -278,10 +283,11 @@ export class Code39Scanner {
     }
   }
 
-  #scanFrame(): void {
-    if (isDocumentHidden()) return;
+  /** Decodes the current frame and emits detections. Returns whether a frame was processed. */
+  #scanFrame(): boolean {
+    if (isDocumentHidden()) return false;
     const frame = this.#source.grabFrame();
-    if (!frame) return;
+    if (!frame) return false;
 
     const linePhase = this.#linePhase;
     this.#linePhase = (linePhase + LINE_PHASE_STEP) % 1;
@@ -291,11 +297,12 @@ export class Code39Scanner {
     const generation = this.#generation;
     for (const result of results) {
       // A listener may have stopped or disposed the scanner; nothing is emitted after that.
-      if (generation !== this.#generation) return;
+      if (generation !== this.#generation) break;
       if (appeared.has(result.rawText)) {
         this.#events.emit(ScannerEvent.Detect, { ...result, timestamp });
       }
     }
+    return true;
   }
 
   #reportError(error: Code39ScannerError): void {

@@ -88,7 +88,9 @@ const NUMBER_RULES = {
   minLength: { min: 1, max: 1000, integer: true },
   minQuietZone: { min: 0, max: 100, integer: false },
   scanLines: { min: 1, max: 1000, integer: true },
-  minConfirmations: { min: 1, max: 1000, integer: true },
+  // Reachable on any ordinary barcode (the walk along the bars supplies the lines); higher values
+  // would only reject real barcodes.
+  minConfirmations: { min: 1, max: 10, integer: true },
   linePhase: { min: 0, max: 1, integer: false },
   scanIntervalMs: { min: 0, max: 60_000, integer: false },
   presenceTimeoutMs: { min: 0, max: 3_600_000, integer: false },

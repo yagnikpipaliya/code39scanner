@@ -42,6 +42,7 @@ describe('resolveScannerOptions', () => {
     { maxFrameSize: 10 },
     { maxFrameSize: 640.5 },
     { minLength: 1.5 },
+    { minConfirmations: 11 },
     { minFrameConfirmations: 0 },
     { minFrameConfirmations: 2.5 },
     { minFrameConfirmations: FRAME_CONFIRMATION_WINDOW + 1 },

@@ -381,6 +381,20 @@ describe('Code39Scanner', () => {
     await expect(detected).resolves.toMatchObject({ text: 'SCAN-1' });
   });
 
+  it('counts only processed frames towards the failure limit', async () => {
+    // A source that alternates "not ready yet" and failing must still reach the limit.
+    const { source, scanner, errors } = setup();
+    let tick = 0;
+    vi.spyOn(source, 'grabFrame').mockImplementation(() => {
+      if (tick++ % 2 === 0) return null;
+      throw new Error('broken pipeline');
+    });
+    await scanner.start();
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(errors).toHaveLength(5);
+    expect(scanner.state).toBe(ScannerState.Idle);
+  });
+
   it('stops after repeated frame failures instead of erroring forever', async () => {
     const { source, scanner, errors } = setup();
     vi.spyOn(source, 'grabFrame').mockImplementation(() => {

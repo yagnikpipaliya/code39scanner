@@ -103,8 +103,9 @@ scanner.on(ScannerEvent.StateChange, (state) => {
 ```
 
 When the owning view goes away (for example when a component unmounts), call `dispose()`. It
-cancels a `start()` still waiting on the permission prompt, releases the camera, delivers the
-final `idle` state change, and then detaches all listeners:
+cancels a pending `start()`, releases the camera, delivers the final `idle` state change, and
+then detaches all listeners. A permission prompt that is already on screen cannot be closed by
+the page; if the user accepts it afterwards, the camera is released at once.
 
 ```js
 const scanner = new Code39Scanner({ video });
@@ -185,7 +186,7 @@ new Code39Scanner(options: Code39ScannerOptions)
 | `minQuietZone`          | `number`            | `5`     | Required blank margin on each side, in narrow-bar widths (the spec requires 10).       |
 | `scanLines`             | `number`            | `24`    | Primary scanlines sampled per orientation per frame.                                   |
 | `orientations`          | `ScanOrientation[]` | both    | Scan directions.                                                                       |
-| `minConfirmations`      | `number`            | `2`     | Independent scanlines that must agree before a value is reported.                      |
+| `minConfirmations`      | `number`            | `2`     | Independent scanlines that must agree before a value is reported (up to 10).           |
 | `minFrameConfirmations` | `number`            | `1`     | Frames, out of the last 10, that must decode a value before it is reported (up to 10). |
 | `scanIntervalMs`        | `number`            | `100`   | Minimum delay between frame decodes.                                                   |
 | `presenceTimeoutMs`     | `number`            | `1500`  | Time a barcode must be out of view before it is reported again.                        |
@@ -193,17 +194,17 @@ new Code39Scanner(options: Code39ScannerOptions)
 
 Invalid options throw `InvalidOptionsError` from the constructor.
 
-| Member                                  | Description                                                                                                |
-| --------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| `start({ deviceId? }): Promise<void>`   | Opens the camera (rear preferred) and starts scanning. No-op when already scanning that camera.            |
-| `switchCamera(deviceId): Promise<void>` | Restarts on another camera. The state goes `scanning → starting → scanning`.                               |
-| `stop(): Promise<void>`                 | Stops scanning and releases the camera immediately. A pending `start()` rejects with `OperationCancelled`. |
-| `dispose(): Promise<void>`              | Stops (listeners still receive the final `idle`), then detaches all listeners.                             |
-| `on(event, listener): () => void`       | Subscribes to an event and returns an unsubscribe function. `off(event, listener)` also unsubscribes.      |
-| `state: ScannerState`                   | `'idle'`, `'starting'` or `'scanning'`.                                                                    |
-| `activeDeviceId: string \| undefined`   | Device id of the camera in use.                                                                            |
-| `Code39Scanner.isSupported()`           | Whether the browser supports camera scanning: the camera API and a working Canvas 2D context.              |
-| `Code39Scanner.listCameras()`           | Available cameras as `{ deviceId, label }`.                                                                |
+| Member                                  | Description                                                                                                                                |
+| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `start({ deviceId? }): Promise<void>`   | Opens the camera (rear preferred) and starts scanning. No-op when already scanning that camera.                                            |
+| `switchCamera(deviceId): Promise<void>` | Restarts on another camera. The state goes `scanning → starting → scanning`.                                                               |
+| `stop(): Promise<void>`                 | Stops scanning and releases the camera. A pending `start()` rejects with `OperationCancelled`; a camera it gets later is released at once. |
+| `dispose(): Promise<void>`              | Stops (listeners still receive the final `idle`), then detaches all listeners.                                                             |
+| `on(event, listener): () => void`       | Subscribes to an event and returns an unsubscribe function. `off(event, listener)` also unsubscribes.                                      |
+| `state: ScannerState`                   | `'idle'`, `'starting'` or `'scanning'`.                                                                                                    |
+| `activeDeviceId: string \| undefined`   | Device id of the camera in use.                                                                                                            |
+| `Code39Scanner.isSupported()`           | Whether the browser supports camera scanning: the camera API and a working Canvas 2D context.                                              |
+| `Code39Scanner.listCameras()`           | Available cameras as `{ deviceId, label }`.                                                                                                |
 
 Lifecycle calls are serialized, so overlapping calls such as double clicks are safe. Once a
 listener calls `stop()` or `dispose()`, no further events of that frame are delivered.
@@ -218,11 +219,11 @@ listener calls `stop()` or `dispose()`, no further events of that frame are deli
 `FrameProcessingError` (the original error is its `cause`), and scanning continues. Empty frames,
 for example from a camera that is still warming up, are simply skipped. Scanning stops
 automatically in two cases: the error cannot be fixed by retrying (unsupported browser, camera
-unavailable or disconnected, or a frame source producing invalid frames), or 5 frames in a row
-fail. The failure is reported once in either case. When an `Error` event arrives, `state` tells
-the two apart: still `scanning` means the error was recoverable, `idle` means scanning stopped.
-Timing uses a monotonic clock, so changes to the system time cannot cause duplicate or missed
-reports.
+unavailable or disconnected, or a frame source producing invalid frames), or 5 processed frames
+in a row fail (ticks without a frame, such as while the page is hidden, do not count). The
+failure is reported once in either case. When an `Error` event arrives, `state` tells the two
+apart: still `scanning` means the error was recoverable, `idle` means scanning stopped. Timing
+uses a monotonic clock, so changes to the system time cannot cause duplicate or missed reports.
 
 ### `Code39ImageDecoder` and `decodeImage`
 
@@ -331,7 +332,8 @@ stops decoding, so a barcode crossed by a single sampled line still confirms.
 When scanning live, `minFrameConfirmations` can additionally require the value in that many of
 the last 10 frames (`FRAME_CONFIRMATION_WINDOW`). Misses in between do not reset the count, so
 small barcodes that the moving scanlines cross only in some frames still confirm, and it counts
-frames rather than time, so it works with any `presenceTimeoutMs`.
+frames rather than time, so it works with any `presenceTimeoutMs`. A barcode that has left the
+view must be confirmed again when it returns.
 
 **Source layout.** `src/core` holds the symbology table, width decoder and Full ASCII.
 `src/image` holds luminance sources, the binarizer and the image decoder. `src/camera` holds the

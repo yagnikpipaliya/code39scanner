@@ -50,16 +50,20 @@ const UNKNOWN_MEDIA_ERROR: readonly [CameraErrorClass, string] = [
 const hasCameraApi = (): boolean =>
   typeof navigator !== 'undefined' && typeof navigator.mediaDevices?.getUserMedia === 'function';
 
-/** Creates a 2D context (offscreen when available), or `null` if the browser cannot provide one. */
+/**
+ * Creates a 2D context, preferring an offscreen canvas and falling back to a regular `<canvas>`
+ * when `OffscreenCanvas` is missing or cannot provide a 2D context. `null` if neither can.
+ */
 function createContext2D(): Context2D | null {
   const settings: CanvasRenderingContext2DSettings = { willReadFrequently: true };
-  if (typeof OffscreenCanvas !== 'undefined') {
-    return new OffscreenCanvas(1, 1).getContext('2d', settings);
-  }
-  if (typeof document !== 'undefined') {
-    return document.createElement('canvas').getContext('2d', settings);
-  }
-  return null;
+  const offscreen =
+    typeof OffscreenCanvas !== 'undefined'
+      ? new OffscreenCanvas(1, 1).getContext('2d', settings)
+      : null;
+  if (offscreen) return offscreen;
+  return typeof document !== 'undefined'
+    ? document.createElement('canvas').getContext('2d', settings)
+    : null;
 }
 
 /** Secure context and camera API. Canvas support is verified by creating the real context. */

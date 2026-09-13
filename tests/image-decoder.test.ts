@@ -116,6 +116,13 @@ describe('decodeImage', () => {
       InvalidOptionsError,
     );
     expect(() => new Code39ImageDecoder({ minConfirmations: 0 })).toThrow(InvalidOptionsError);
+    expect(() => new Code39ImageDecoder({ minConfirmations: 11 })).toThrow(InvalidOptionsError);
+  });
+
+  it('reaches the maximum confirmation count on an ordinary barcode', () => {
+    // 60px bars and 6px confirmation spacing leave room for 10 independent lines.
+    const image = renderBarcode(TEXT, { narrow: 2, height: 100, barHeight: 0.6 });
+    expect(decodeImage(image, { minConfirmations: 10 })?.text).toBe(TEXT);
   });
 });
 

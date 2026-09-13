@@ -92,14 +92,30 @@ describe('PresenceTracker with minSightings', () => {
     expect(tracker.observe(['A'])).toEqual(['A']);
   });
 
-  it('confirms regardless of the timeout, even 0', () => {
-    // Timeout 0 keeps no presence memory, so a confirmed key is reported on every frame.
+  it('keeps confirming with any timeout, even 0', () => {
+    // Timeout 0 treats every frame gap as the key leaving, so each report needs a fresh
+    // confirmation, but detection never stops.
     const { tracker, advance } = setup(0, 2);
-    expect(tracker.observe(['A'])).toEqual([]);
-    advance(100);
-    expect(tracker.observe(['A'])).toEqual(['A']);
-    advance(100);
-    expect(tracker.observe(['A'])).toEqual(['A']);
+    const reports: string[][] = [];
+    for (let i = 0; i < 6; i++) {
+      reports.push(tracker.observe(['A']));
+      advance(100);
+    }
+    expect(reports).toEqual([[], ['A'], [], ['A'], [], ['A']]);
+  });
+
+  it('requires a fresh confirmation when a reported key comes back', () => {
+    const { tracker, advance } = setup(300, 3);
+    const frame = (keys: string[]) => {
+      const appeared = tracker.observe(keys);
+      advance(100);
+      return appeared;
+    };
+    for (let i = 0; i < 8; i++) frame(['A']); // reported on the 3rd frame
+    for (let i = 0; i < 4; i++) frame([]); // absent for longer than the timeout
+    expect(frame(['A'])).toEqual([]);
+    expect(frame(['A'])).toEqual([]);
+    expect(frame(['A'])).toEqual(['A']);
   });
 
   it('keeps a reported key present across missed frames', () => {

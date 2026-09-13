@@ -63,7 +63,11 @@ export class PresenceTracker {
   /** Drops presences older than the timeout and sightings outside the confirmation window. */
   #forgetStale(now: number, frame: number): void {
     for (const [key, lastSeenAt] of this.#present) {
-      if (now - lastSeenAt > this.#timeoutMs) this.#present.delete(key);
+      if (now - lastSeenAt > this.#timeoutMs) {
+        // The key is gone: its earlier sightings must not confirm its next appearance.
+        this.#present.delete(key);
+        this.#sightings.delete(key);
+      }
     }
     const oldestCounted = frame - FRAME_CONFIRMATION_WINDOW + 1;
     for (const [key, frames] of this.#sightings) {
