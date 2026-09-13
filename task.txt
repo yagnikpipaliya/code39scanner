@@ -1,0 +1,13 @@
+I got pratical task from interviewer.
+
+Task is Create NPM package for scanning Code 39 barcode, in pure Javascript, without using any external library.
+And Host this project on vercel.
+On vercel link open, open a camera for barcode scanning
+And list barcode data below in website.
+
+Note: this code not need to host on NPM. only on vercel for now.
+
+Code must be follows:
+- DRY, Solid, KISS Principals - wherever applicable
+- Enterprise level
+- Robust solution, Not a patch solution
