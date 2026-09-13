@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta
+      name="description"
+      content="Scan Code 39 barcodes with your camera using a zero-dependency JavaScript scanner."
+    />
+    <meta name="theme-color" content="#0f172a" />
+    <title>Code 39 Scanner</title>
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230f172a'/%3E%3Cpath d='M7 8v16M10 8v16M12 8v16M16 8v16M18 8v16M21 8v16M25 8v16' stroke='%23fff' stroke-width='1.5'/%3E%3C/svg%3E"
+    />
+    <link rel="stylesheet" href="./styles.css" />
+    <script type="module" src="./main.js"></script>
+  </head>
+  <body>
+    <main class="app">
+      <header class="app__header">
+        <h1>Code 39 Scanner</h1>
+        <p>Point your camera at a Code 39 barcode. Every scan is listed below.</p>
+      </header>
+
+      <section class="viewer" id="viewer" aria-label="Camera preview">
+        <video id="preview" class="viewer__video" playsinline muted></video>
+        <div class="viewer__guide" aria-hidden="true"><span class="viewer__laser"></span></div>
+        <p id="viewer-placeholder" class="viewer__placeholder">Camera is off</p>
+      </section>
+
+      <div id="status" class="status" role="status" aria-live="polite" hidden></div>
+
+      <section class="controls" aria-label="Scanner controls">
+        <button id="toggle" class="button button--primary" type="button">Start scanning</button>
+        <label class="field">
+          <span class="field__label">Camera</span>
+          <select id="camera-select" class="field__control" disabled>
+            <option value="">Start scanning to choose</option>
+          </select>
+        </label>
+      </section>
+
+      <section class="results" aria-labelledby="results-title">
+        <div class="results__header">
+          <h2 id="results-title">
+            Scanned barcodes <span id="results-count" class="badge">0</span>
+          </h2>
+          <button id="clear" class="button button--ghost" type="button" disabled>Clear all</button>
+        </div>
+        <p id="results-empty" class="results__empty">No barcodes scanned yet.</p>
+        <ol id="results-list" class="results__list"></ol>
+      </section>
+
+      <footer class="app__footer">
+        Zero-dependency Code 39 decoder · All processing happens on this device.
+      </footer>
+    </main>
+
+    <template id="result-template">
+      <li class="result">
+        <div class="result__body">
+          <code class="result__text"></code>
+          <time class="result__time"></time>
+        </div>
+        <button class="button button--small result__copy" type="button">Copy</button>
+      </li>
+    </template>
+  </body>
+</html>
