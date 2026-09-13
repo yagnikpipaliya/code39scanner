@@ -7,12 +7,13 @@
       name="description"
       content="Scan Code 39 barcodes with your camera using a zero-dependency JavaScript scanner."
     />
-    <meta name="theme-color" content="#0f172a" />
+    <meta name="theme-color" content="#f7f6f3" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#121211" media="(prefers-color-scheme: dark)" />
     <title>Code 39 Scanner</title>
     <link rel="canonical" href="https://code39scanner.vercel.app/" />
     <link
       rel="icon"
-      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230f172a'/%3E%3Cpath d='M7 8v16M10 8v16M12 8v16M16 8v16M18 8v16M21 8v16M25 8v16' stroke='%23fff' stroke-width='1.5'/%3E%3C/svg%3E"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%231c1b19'/%3E%3Cpath d='M9 9v14M12 9v14M14.5 9v14M18 9v14M20.5 9v14M23 9v14' stroke='%23faf9f7' stroke-width='1.6'/%3E%3C/svg%3E"
     />
     <link rel="stylesheet" href="./styles.css" />
     <script type="module" src="./main.js"></script>
@@ -20,14 +21,47 @@
   <body>
     <main class="app">
       <header class="app__header">
-        <h1>Code 39 Scanner</h1>
-        <p>Point your camera at a Code 39 barcode. Every scan is listed below.</p>
+        <span class="brand" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="currentColor">
+            <rect x="4" y="5" width="1.6" height="14" rx="0.5" />
+            <rect x="7" y="5" width="1" height="14" rx="0.5" />
+            <rect x="9.4" y="5" width="2.2" height="14" rx="0.5" />
+            <rect x="13" y="5" width="1" height="14" rx="0.5" />
+            <rect x="15.4" y="5" width="1.6" height="14" rx="0.5" />
+            <rect x="18.4" y="5" width="1.6" height="14" rx="0.5" />
+          </svg>
+        </span>
+        <div>
+          <h1>Code 39 Scanner</h1>
+          <p class="app__tagline">Point · Scan · Copy</p>
+        </div>
       </header>
 
       <section class="viewer" id="viewer" aria-label="Camera preview">
         <video id="preview" class="viewer__video" playsinline muted></video>
         <div class="viewer__guide" aria-hidden="true"><span class="viewer__laser"></span></div>
-        <p id="viewer-placeholder" class="viewer__placeholder">Camera is off</p>
+        <span class="viewer__badge" aria-hidden="true"></span>
+        <div class="viewer__placeholder">
+          <svg
+            class="viewer__placeholder-icon"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.6"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            <path
+              d="M4 8.5A2.5 2.5 0 0 1 6.5 6h1.2L9 4h6l1.3 2h1.2A2.5 2.5 0 0 1 20 8.5v8a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 16.5z"
+            />
+            <circle cx="12" cy="12.5" r="3.5" />
+          </svg>
+          <p class="viewer__placeholder-title">Camera is off</p>
+          <p class="viewer__placeholder-hint">
+            Press Start scanning, then point the camera at a Code 39 barcode.
+          </p>
+        </div>
       </section>
 
       <div id="status" class="status" role="status" aria-live="polite" hidden></div>
@@ -47,9 +81,22 @@
           <h2 id="results-title">
             Scanned barcodes <span id="results-count" class="badge">0</span>
           </h2>
-          <button id="clear" class="button button--ghost" type="button" disabled>Clear all</button>
+          <button id="clear" class="button button--text" type="button" disabled>Clear all</button>
         </div>
-        <p id="results-empty" class="results__empty">No barcodes scanned yet.</p>
+        <div id="results-empty" class="results__empty">
+          <span class="results__empty-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="currentColor">
+              <rect x="4" y="5" width="1.6" height="14" rx="0.5" />
+              <rect x="7" y="5" width="1" height="14" rx="0.5" />
+              <rect x="9.4" y="5" width="2.2" height="14" rx="0.5" />
+              <rect x="13" y="5" width="1" height="14" rx="0.5" />
+              <rect x="15.4" y="5" width="1.6" height="14" rx="0.5" />
+              <rect x="18.4" y="5" width="1.6" height="14" rx="0.5" />
+            </svg>
+          </span>
+          <p class="results__empty-title">No barcodes scanned yet</p>
+          <p class="results__empty-hint">Scans appear here and are saved on this device.</p>
+        </div>
         <ol id="results-list" class="results__list"></ol>
       </section>
 
@@ -60,11 +107,21 @@
 
     <template id="result-template">
       <li class="result">
+        <span class="result__icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="currentColor">
+            <rect x="4" y="5" width="1.6" height="14" rx="0.5" />
+            <rect x="7" y="5" width="1" height="14" rx="0.5" />
+            <rect x="9.4" y="5" width="2.2" height="14" rx="0.5" />
+            <rect x="13" y="5" width="1" height="14" rx="0.5" />
+            <rect x="15.4" y="5" width="1.6" height="14" rx="0.5" />
+            <rect x="18.4" y="5" width="1.6" height="14" rx="0.5" />
+          </svg>
+        </span>
         <div class="result__body">
           <code class="result__text"></code>
           <time class="result__time"></time>
         </div>
-        <button class="button button--small result__copy" type="button">Copy</button>
+        <button class="button button--chip result__copy" type="button">Copy</button>
       </li>
     </template>
   </body>
