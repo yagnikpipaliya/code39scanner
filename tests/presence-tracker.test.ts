@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { PresenceTracker } from '../src/camera/presence-tracker.js';
 import { InvalidOptionsError } from '../src/errors.js';
+import { FRAME_CONFIRMATION_WINDOW } from '../src/options.js';
 
-function setup(timeoutMs = 1000) {
+function setup(timeoutMs = 1000, minSightings = 1) {
   let now = 0;
-  const tracker = new PresenceTracker(timeoutMs, () => now);
+  const tracker = new PresenceTracker(timeoutMs, () => now, minSightings);
   return { tracker, advance: (ms: number) => (now += ms) };
 }
 
@@ -58,40 +59,42 @@ describe('PresenceTracker', () => {
     expect(() => new PresenceTracker(timeoutMs)).toThrow(InvalidOptionsError);
   });
 
-  it.each([0, 1.5])('rejects an invalid sighting count (%s)', (minSightings) => {
-    expect(() => new PresenceTracker(1000, () => 0, minSightings)).toThrow(InvalidOptionsError);
-  });
+  it.each([0, 1.5, FRAME_CONFIRMATION_WINDOW + 1])(
+    'rejects an invalid sighting count (%s)',
+    (minSightings) => {
+      expect(() => new PresenceTracker(1000, () => 0, minSightings)).toThrow(InvalidOptionsError);
+    },
+  );
 });
 
 describe('PresenceTracker with minSightings', () => {
-  function setupConfirming(minSightings: number, timeoutMs = 1000) {
-    let now = 0;
-    const tracker = new PresenceTracker(timeoutMs, () => now, minSightings);
-    return { tracker, advance: (ms: number) => (now += ms) };
-  }
-
-  it('reports a key only once it has been seen in enough frames', () => {
-    const { tracker, advance } = setupConfirming(3);
+  it('reports a key once it has been seen in enough frames', () => {
+    const { tracker } = setup(1000, 3);
     expect(tracker.observe(['A'])).toEqual([]);
-    advance(100);
     expect(tracker.observe(['A'])).toEqual([]);
-    advance(100);
     expect(tracker.observe(['A'])).toEqual(['A']);
-    advance(100);
     expect(tracker.observe(['A'])).toEqual([]);
   });
 
-  it('requires the sightings to be in consecutive frames', () => {
-    const { tracker } = setupConfirming(2);
+  it('does not reset the count on missed frames within the window', () => {
+    // Moving scanlines cross a small barcode only in some frames.
+    const { tracker } = setup(1000, 2);
     expect(tracker.observe(['A'])).toEqual([]);
-    expect(tracker.observe([])).toEqual([]);
+    for (let i = 0; i < FRAME_CONFIRMATION_WINDOW - 2; i++) expect(tracker.observe([])).toEqual([]);
+    expect(tracker.observe(['A'])).toEqual(['A']);
+  });
+
+  it('forgets sightings older than the window', () => {
+    const { tracker } = setup(1000, 2);
+    tracker.observe(['A']);
+    for (let i = 0; i < FRAME_CONFIRMATION_WINDOW - 1; i++) tracker.observe([]);
     expect(tracker.observe(['A'])).toEqual([]);
     expect(tracker.observe(['A'])).toEqual(['A']);
   });
 
   it('confirms regardless of the timeout, even 0', () => {
     // Timeout 0 keeps no presence memory, so a confirmed key is reported on every frame.
-    const { tracker, advance } = setupConfirming(2, 0);
+    const { tracker, advance } = setup(0, 2);
     expect(tracker.observe(['A'])).toEqual([]);
     advance(100);
     expect(tracker.observe(['A'])).toEqual(['A']);
@@ -100,7 +103,7 @@ describe('PresenceTracker with minSightings', () => {
   });
 
   it('keeps a reported key present across missed frames', () => {
-    const { tracker, advance } = setupConfirming(2);
+    const { tracker, advance } = setup(1000, 2);
     tracker.observe(['A']);
     advance(100);
     expect(tracker.observe(['A'])).toEqual(['A']);
@@ -111,7 +114,14 @@ describe('PresenceTracker with minSightings', () => {
   });
 
   it('counts a key once per frame', () => {
-    const { tracker } = setupConfirming(2);
+    const { tracker } = setup(1000, 2);
     expect(tracker.observe(['A', 'A'])).toEqual([]);
+  });
+
+  it('starts counting afresh after reset', () => {
+    const { tracker } = setup(1000, 2);
+    tracker.observe(['A']);
+    tracker.reset();
+    expect(tracker.observe(['A'])).toEqual([]);
   });
 });

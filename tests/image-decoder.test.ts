@@ -185,6 +185,19 @@ describe('Code39ImageDecoder', () => {
     expect(texts).toEqual(['DUP']);
   });
 
+  it('adds up support from lines that measure slightly different bar widths', () => {
+    // One label crossed by two primary lines (rows 47 and 56 of 100) that read its bars as 2.4 px
+    // and 2.6 px (e.g. through tilt or blur). Each row is 1px tall, so walking finds nothing
+    // more: the two lines must count together, as one symbol size, to reach 2 confirmations.
+    const thinner = renderBarcode(TEXT, { narrow: 2.4, height: 1, barHeight: 1 });
+    const wider = renderBarcode(TEXT, { narrow: 2.6, height: 1, barHeight: 1 });
+    const image = composeImages(Math.max(thinner.width, wider.width), 100, [
+      { image: thinner, x: 0, y: 47 },
+      { image: wider, x: 0, y: 56 },
+    ]);
+    expect(new Code39ImageDecoder(HORIZONTAL_ONLY).decode(image)?.text).toBe(TEXT);
+  });
+
   it('finds two barcodes stacked vertically', () => {
     const top = renderBarcode('TOP', { narrow: 2, height: 60, barHeight: 0.9 });
     const bottom = renderBarcode('BOTTOM', { narrow: 2, height: 60, barHeight: 0.9 });

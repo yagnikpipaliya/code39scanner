@@ -25,6 +25,13 @@ const DEFAULT_LINE_PHASE = 0.5;
  */
 const MIN_CONFIRMATION_SPACING_MODULES = 3;
 
+/**
+ * Scanlines whose measured module widths differ by at most this fraction belong to the same
+ * symbol size. Measurements of one barcode vary with tilt, perspective and blur; labels of the
+ * same text but clearly different sizes stay apart.
+ */
+const MODULE_WIDTH_TOLERANCE = 0.25;
+
 /** Evenly spaced primary line positions across `length`, ordered from the center outwards. */
 function primaryLinePositions(count: number, length: number, phase: number): number[] {
   const lines = Math.min(count, length);
@@ -52,39 +59,58 @@ function countIndependent(positions: readonly number[], spacing: number): number
   return count;
 }
 
-/**
- * Tracks the scanlines supporting each decoded value and how many of them are independent.
- *
- * Support is grouped by value *and* confirmation spacing (i.e. symbol size), so two labels with
- * the same text but different sizes are confirmed independently, each at its own spacing.
- */
-class ConfirmationLedger {
-  /** `${spacing}:${rawText}` → orientation → supporting line positions. */
-  readonly #groups = new Map<string, Map<ScanOrientation, Set<number>>>();
+/** Scanlines supporting one value at one symbol size. */
+class SupportGroup {
+  readonly moduleWidth: number;
+  /** Minimum distance between two independent supporting lines. */
+  readonly spacing: number;
+  readonly #lines = new Map<ScanOrientation, Set<number>>();
+
+  constructor(moduleWidth: number) {
+    this.moduleWidth = moduleWidth;
+    this.spacing = Math.max(1, Math.round(moduleWidth * MIN_CONFIRMATION_SPACING_MODULES));
+  }
+
+  matches(moduleWidth: number): boolean {
+    return Math.abs(moduleWidth - this.moduleWidth) <= this.moduleWidth * MODULE_WIDTH_TOLERANCE;
+  }
 
   /** Records a supporting line; returns the number of mutually independent supporting lines. */
-  add(rawText: string, spacing: number, orientation: ScanOrientation, position: number): number {
-    const key = `${spacing}:${rawText}`;
-    let lines = this.#groups.get(key);
-    if (!lines) {
-      lines = new Map();
-      this.#groups.set(key, lines);
-    }
-    let positions = lines.get(orientation);
+  add(orientation: ScanOrientation, position: number): number {
+    let positions = this.#lines.get(orientation);
     if (!positions) {
       positions = new Set();
-      lines.set(orientation, positions);
+      this.#lines.set(orientation, positions);
     }
     positions.add(position);
 
     let independent = 0;
-    for (const linePositions of lines.values()) {
+    for (const linePositions of this.#lines.values()) {
       independent += countIndependent(
         [...linePositions].sort((a, b) => a - b),
-        spacing,
+        this.spacing,
       );
     }
     return independent;
+  }
+}
+
+/** Groups supporting scanlines by value and symbol size (see {@link MODULE_WIDTH_TOLERANCE}). */
+class ConfirmationLedger {
+  readonly #groups = new Map<string, SupportGroup[]>();
+
+  groupFor(rawText: string, moduleWidth: number): SupportGroup {
+    let groups = this.#groups.get(rawText);
+    if (!groups) {
+      groups = [];
+      this.#groups.set(rawText, groups);
+    }
+    let group = groups.find((candidate) => candidate.matches(moduleWidth));
+    if (!group) {
+      group = new SupportGroup(moduleWidth);
+      groups.push(group);
+    }
+    return group;
   }
 }
 
@@ -142,13 +168,13 @@ export class Code39ImageDecoder {
           const { rawText } = barcode;
           if (confirmed.has(rawText)) continue;
 
-          const spacing = Math.max(1, Math.round(moduleWidth * MIN_CONFIRMATION_SPACING_MODULES));
-          let support = ledger.add(rawText, spacing, orientation, position);
+          const group = ledger.groupFor(rawText, moduleWidth);
+          let support = group.add(orientation, position);
           // Walk along the bars in both directions until the value stops decoding.
-          for (const step of [-spacing, spacing]) {
+          for (const step of [-group.spacing, group.spacing]) {
             for (const probe of walkFrom(position, step, length)) {
               if (support >= minConfirmations || !decodes(probe, rawText)) break;
-              support = ledger.add(rawText, spacing, orientation, probe);
+              support = group.add(orientation, probe);
             }
           }
           if (support >= minConfirmations) {

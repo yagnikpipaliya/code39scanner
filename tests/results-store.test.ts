@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { MAX_RESULTS, ResultsStore, STORAGE_KEY } from '../demo/results-store.js';
+import {
+  LEGACY_STORAGE_KEY,
+  MAX_RESULTS,
+  ResultsStore,
+  STORAGE_KEY,
+} from '../demo/results-store.js';
 
 /** In-memory `localStorage` that can simulate a full quota. */
 class MemoryStorage {
@@ -15,8 +20,12 @@ class MemoryStorage {
     this.items.set(key, value);
   }
 
-  stored(): { clearedAt: number; results: { text: string }[] } {
+  stored(): { generation: number; results: { text: string }[] } {
     return JSON.parse(this.items.get(STORAGE_KEY) ?? 'null');
+  }
+
+  storedTexts(): string[] {
+    return this.stored().results.map((result) => result.text);
   }
 }
 
@@ -28,15 +37,14 @@ function openTab(storage: MemoryStorage) {
     store,
     texts: () => store.results.map((result) => result.text),
     /** Delivers the `storage` event the browser fires in this tab when another tab writes. */
-    receiveStorageEvent: () =>
-      events.dispatchEvent(Object.assign(new Event('storage'), { key: STORAGE_KEY })),
+    receiveStorageEvent: (key: string | null = STORAGE_KEY) =>
+      events.dispatchEvent(Object.assign(new Event('storage'), { key })),
   };
 }
 
 const scan = (text: string, timestamp: number) => ({ text, timestamp });
 
 beforeEach(() => {
-  vi.useFakeTimers({ toFake: ['Date'] });
   vi.spyOn(console, 'warn').mockImplementation(() => undefined);
 });
 
@@ -55,10 +63,26 @@ describe('ResultsStore', () => {
     expect(openTab(storage).texts()).toEqual(['SECOND', 'FIRST']);
   });
 
-  it('reads history saved by earlier versions (a plain array)', () => {
+  it('migrates history saved by earlier versions without modifying it', () => {
     const storage = new MemoryStorage();
-    storage.items.set(STORAGE_KEY, JSON.stringify([{ id: '1', text: 'LEGACY', timestamp: 5 }]));
-    expect(openTab(storage).texts()).toEqual(['LEGACY']);
+    const legacy = JSON.stringify([{ id: '1', text: 'LEGACY', timestamp: 5 }]);
+    storage.items.set(LEGACY_STORAGE_KEY, legacy);
+
+    const tab = openTab(storage);
+    expect(tab.texts()).toEqual(['LEGACY']);
+    tab.store.add(scan('NEW', 1000));
+    expect(storage.storedTexts()).toEqual(['NEW', 'LEGACY']);
+    // Older builds still find their own data untouched.
+    expect(storage.items.get(LEGACY_STORAGE_KEY)).toBe(legacy);
+  });
+
+  it('ignores writes by older builds to the legacy key', () => {
+    const storage = new MemoryStorage();
+    const tab = openTab(storage);
+    tab.store.add(scan('CURRENT', 1000));
+    storage.items.set(LEGACY_STORAGE_KEY, JSON.stringify([]));
+    tab.receiveStorageEvent(LEGACY_STORAGE_KEY);
+    expect(tab.texts()).toEqual(['CURRENT']);
   });
 
   it('ignores corrupted data and repairs it on the next write', () => {
@@ -67,7 +91,7 @@ describe('ResultsStore', () => {
     const tab = openTab(storage);
     expect(tab.texts()).toEqual([]);
     tab.store.add(scan('NEW', 1000));
-    expect(storage.stored().results.map((r) => r.text)).toEqual(['NEW']);
+    expect(storage.storedTexts()).toEqual(['NEW']);
   });
 
   it('keeps history in memory when storage is full', () => {
@@ -89,7 +113,7 @@ describe('ResultsStore', () => {
 
     a.receiveStorageEvent();
     expect(a.texts()).toEqual(['OTHER TAB', 'UNSAVED']);
-    expect(storage.stored().results.map((r) => r.text)).toEqual(['OTHER TAB', 'UNSAVED']);
+    expect(storage.storedTexts()).toEqual(['OTHER TAB', 'UNSAVED']);
   });
 
   it('does not undo a clear made in another tab', () => {
@@ -100,26 +124,34 @@ describe('ResultsStore', () => {
     a.store.add(scan('UNSAVED', 2000));
     storage.full = false;
 
-    vi.setSystemTime(3000);
     openTab(storage).store.clear();
     a.receiveStorageEvent();
     expect(a.texts()).toEqual([]);
-    expect(storage.stored().results).toEqual([]);
+    expect(storage.stored()).toEqual({ generation: 1, results: [] });
   });
 
-  it('keeps a clear made while storage was full, but not scans made after it', () => {
+  it('lets a clear win over scans from a tab that had not seen it', () => {
     const storage = new MemoryStorage();
     const a = openTab(storage);
     a.store.add(scan('OLD', 1000));
     storage.full = true;
-    vi.setSystemTime(2000);
     a.store.clear();
     storage.full = false;
-    openTab(storage).store.add(scan('NEW', 3000));
+    openTab(storage).store.add(scan('CONCURRENT', 3000));
 
     a.receiveStorageEvent();
-    expect(a.texts()).toEqual(['NEW']);
-    expect(storage.stored().results.map((r) => r.text)).toEqual(['NEW']);
+    expect(a.texts()).toEqual([]);
+    expect(storage.stored()).toEqual({ generation: 1, results: [] });
+  });
+
+  it('never hides a scan just added, whatever the system clock says', () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(Date.parse('2030-01-01'));
+    const tab = openTab(new MemoryStorage());
+    tab.store.clear();
+    vi.setSystemTime(Date.parse('2020-01-01'));
+    tab.store.add(scan('AFTER CLOCK CORRECTION', Date.now()));
+    expect(tab.texts()).toEqual(['AFTER CLOCK CORRECTION']);
   });
 
   it('adopts changes from other tabs while in sync', () => {

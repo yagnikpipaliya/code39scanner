@@ -35,6 +35,9 @@ export interface ScanPassOptions {
   readonly linePhase?: number;
 }
 
+/** Number of most recent frames considered when confirming a value across frames. */
+export const FRAME_CONFIRMATION_WINDOW = 10;
+
 /** Options for the live camera scanner. */
 export interface ScannerOptions extends ImageDecodeOptions {
   /** Minimum delay between frame decodes, in ms. Default `100`. */
@@ -42,9 +45,10 @@ export interface ScannerOptions extends ImageDecodeOptions {
   /** A barcode is reported again only after being out of view this long, in ms. Default `1500`. */
   readonly presenceTimeoutMs?: number;
   /**
-   * Consecutive frames that must decode a value before it is reported. Default `2`: frames carry
-   * independent sensor noise and differently placed scanlines, so a misread in a single frame is
-   * never reported. `1` reports on first sight. Independent of `presenceTimeoutMs`.
+   * Frames, out of the last {@link FRAME_CONFIRMATION_WINDOW}, that must decode a value before it
+   * is reported. Default `1` (report on first sight; agreement between independent scanlines
+   * already guards against misreads). Higher values add protection against one-frame misreads;
+   * misses in between do not reset the count. Independent of `presenceTimeoutMs`.
    */
   readonly minFrameConfirmations?: number;
   /**
@@ -69,7 +73,7 @@ export const DEFAULT_SCANNER_OPTIONS: ResolvedScannerOptions = Object.freeze({
   minConfirmations: 2,
   scanIntervalMs: 100,
   presenceTimeoutMs: 1500,
-  minFrameConfirmations: 2,
+  minFrameConfirmations: 1,
   maxFrameSize: 1920,
 });
 
@@ -88,7 +92,7 @@ const NUMBER_RULES = {
   linePhase: { min: 0, max: 1, integer: false },
   scanIntervalMs: { min: 0, max: 60_000, integer: false },
   presenceTimeoutMs: { min: 0, max: 3_600_000, integer: false },
-  minFrameConfirmations: { min: 1, max: 100, integer: true },
+  minFrameConfirmations: { min: 1, max: FRAME_CONFIRMATION_WINDOW, integer: true },
   maxFrameSize: { min: 64, max: 8192, integer: true },
 } as const satisfies Readonly<Record<string, NumberRule>>;
 

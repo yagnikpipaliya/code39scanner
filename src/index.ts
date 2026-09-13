@@ -33,6 +33,7 @@ export { CODE39_ALPHABET } from './core/symbology.js';
 // Configuration, types and errors
 export {
   DEFAULT_SCANNER_OPTIONS,
+  FRAME_CONFIRMATION_WINDOW,
   type DecodeOptions,
   type ImageDecodeOptions,
   type ScannerOptions,

@@ -21,6 +21,11 @@ const BARCODE = renderBarcode('SCAN-1', { narrow: 2 });
 const OTHER = renderBarcode('SCAN-2', { narrow: 2 });
 /** 30px tall (rows 525–554 of 1080): between the default scanlines at their initial phase. */
 const SHORT = renderBarcode('SMALL', { narrow: 2, height: 1080, barHeight: 30 / 1080 });
+/**
+ * 16px tall (rows 532–547 of 1080), far below the 45px scanline spacing: the moving scanlines
+ * cross it only in some frames (the 2nd, 5th, 8th, …), never in two consecutive ones.
+ */
+const TINY = renderBarcode('TINY', { narrow: 2, height: 1080, barHeight: 17 / 1080 });
 const LEFT = renderBarcode('LEFT', { narrow: 2, height: 80 });
 const RIGHT = renderBarcode('RIGHT', { narrow: 2, height: 80 });
 const TWO_BARCODES = composeImages(LEFT.width + RIGHT.width, 80, [
@@ -128,7 +133,7 @@ describe('Code39Scanner', () => {
     expect(scanner.activeDeviceId).toBe('default');
   });
 
-  it('emits one detection per appearance, once confirmed in two frames', async () => {
+  it('emits one detection per appearance, on first sight by default', async () => {
     const { source, scanner, detections } = setup();
     const startTime = Date.parse('2026-01-01T00:00:00Z');
     vi.setSystemTime(startTime);
@@ -137,8 +142,7 @@ describe('Code39Scanner', () => {
     await vi.advanceTimersByTimeAsync(1000);
     expect(detections).toHaveLength(1);
     expect(detections[0]).toMatchObject({ text: 'SCAN-1', format: BarcodeFormat.Code39 });
-    // First seen at t = 0, confirmed by the second frame at t = 100 ms.
-    expect(detections[0]!.timestamp).toBe(startTime + 100);
+    expect(detections[0]!.timestamp).toBe(startTime);
 
     // Out of view longer than the presence timeout, then back in view → reported again.
     source.frame = BLANK;
@@ -148,8 +152,20 @@ describe('Code39Scanner', () => {
     expect(detections.map((d) => d.text)).toEqual(['SCAN-1', 'SCAN-1']);
   });
 
-  it('ignores a value decoded in a single frame only', async () => {
-    const { source, scanner, detections } = setup();
+  it('confirms across frames when minFrameConfirmations is 2', async () => {
+    const { source, scanner, detections } = setup({ minFrameConfirmations: 2 });
+    const startTime = Date.parse('2026-01-01T00:00:00Z');
+    vi.setSystemTime(startTime);
+    source.frame = BARCODE;
+    await scanner.start();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(detections).toHaveLength(1);
+    // First seen at t = 0, confirmed by the second frame at t = 100 ms.
+    expect(detections[0]!.timestamp).toBe(startTime + 100);
+  });
+
+  it('ignores a value decoded in a single frame when two are required', async () => {
+    const { source, scanner, detections } = setup({ minFrameConfirmations: 2 });
     let frames = 0;
     vi.spyOn(source, 'grabFrame').mockImplementation(() =>
       frames++ === 0 ? luminanceFromRgba(BARCODE) : null,
@@ -159,16 +175,22 @@ describe('Code39Scanner', () => {
     expect(detections).toHaveLength(0);
   });
 
-  it('reports on first sight with minFrameConfirmations: 1', async () => {
-    const { source, scanner, detections } = setup({ minFrameConfirmations: 1 });
-    source.frame = BARCODE;
-    await scanner.start();
-    await vi.advanceTimersByTimeAsync(0);
-    expect(detections.map((d) => d.text)).toEqual(['SCAN-1']);
-  });
+  it.each([1, 2])(
+    'finds a tiny barcode crossed only in some frames (minFrameConfirmations %s)',
+    async (minFrameConfirmations) => {
+      const { source, scanner, detections } = setup({ minFrameConfirmations });
+      source.frame = TINY;
+      await scanner.start();
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(detections.map((d) => d.text)).toEqual(['TINY']);
+    },
+  );
 
   it('keeps detecting with any presence timeout, even 0', async () => {
-    const { source, scanner, detections } = setup({ presenceTimeoutMs: 0 });
+    const { source, scanner, detections } = setup({
+      presenceTimeoutMs: 0,
+      minFrameConfirmations: 2,
+    });
     source.frame = BARCODE;
     await scanner.start();
     await vi.advanceTimersByTimeAsync(1000);
@@ -187,7 +209,7 @@ describe('Code39Scanner', () => {
     expect(detections).toHaveLength(1);
   });
 
-  it('reports a different barcode as soon as it is confirmed', async () => {
+  it('reports a different barcode immediately', async () => {
     const { source, scanner, detections } = setup();
     source.frame = BARCODE;
     await scanner.start();
@@ -215,7 +237,7 @@ describe('Code39Scanner', () => {
   });
 
   it('emits nothing more once a detect listener stops the scanner mid-frame', async () => {
-    const { source, scanner, detections } = setup({ minFrameConfirmations: 1 });
+    const { source, scanner, detections } = setup();
     source.frame = TWO_BARCODES;
     scanner.on(ScannerEvent.Detect, () => void scanner.stop());
     await scanner.start();
@@ -335,9 +357,11 @@ describe('Code39Scanner', () => {
     expect(scanner.state).toBe(ScannerState.Idle);
   });
 
-  it('recovers from an isolated frame failure, reported with a stable code', async () => {
+  it('keeps scanning after an isolated frame failure, reported with a stable code', async () => {
     const { source, scanner, errors } = setup();
     let fail = true;
+    let stateWhenReported: ScannerState | undefined;
+    scanner.on(ScannerEvent.Error, () => (stateWhenReported = scanner.state));
     vi.spyOn(source, 'grabFrame').mockImplementation(() => {
       if (fail) {
         fail = false;
@@ -352,7 +376,8 @@ describe('Code39Scanner', () => {
     expect(errors[0]).toBeInstanceOf(FrameProcessingError);
     expect(errors[0]!.code).toBe(ErrorCode.FrameProcessingFailed);
     expect(errors[0]!.cause).toBe('bad frame');
-    expect(scanner.state).toBe(ScannerState.Scanning);
+    // Listeners can tell a recoverable error apart: the scanner is still scanning.
+    expect(stateWhenReported).toBe(ScannerState.Scanning);
     await expect(detected).resolves.toMatchObject({ text: 'SCAN-1' });
   });
 
@@ -378,13 +403,15 @@ describe('Code39Scanner', () => {
   ])('stops at once on an unrecoverable frame error (%s)', async (_case, createError) => {
     const { source, scanner, errors } = setup();
     const error = createError();
+    let stateWhenReported: ScannerState | undefined;
+    scanner.on(ScannerEvent.Error, () => (stateWhenReported = scanner.state));
     vi.spyOn(source, 'grabFrame').mockImplementation(() => {
       throw error;
     });
     await scanner.start();
     await vi.advanceTimersByTimeAsync(1000);
     expect(errors).toEqual([error]);
-    expect(scanner.state).toBe(ScannerState.Idle);
+    expect(stateWhenReported).toBe(ScannerState.Idle);
   });
 
   it('reports errors globally when there is no error listener', async () => {

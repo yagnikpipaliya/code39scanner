@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { InvalidOptionsError } from '../src/errors.js';
 import {
   DEFAULT_SCANNER_OPTIONS,
+  FRAME_CONFIRMATION_WINDOW,
   resolveScannerOptions,
   validateNumberOption,
 } from '../src/options.js';
@@ -29,6 +30,11 @@ describe('resolveScannerOptions', () => {
     expect(resolveScannerOptions({ scanLines: 2, minConfirmations: 5 }).minConfirmations).toBe(5);
   });
 
+  it('accepts frame confirmations up to the confirmation window', () => {
+    const options = resolveScannerOptions({ minFrameConfirmations: FRAME_CONFIRMATION_WINDOW });
+    expect(options.minFrameConfirmations).toBe(FRAME_CONFIRMATION_WINDOW);
+  });
+
   it.each([
     { scanIntervalMs: -1 },
     { scanIntervalMs: Number.NaN },
@@ -38,6 +44,7 @@ describe('resolveScannerOptions', () => {
     { minLength: 1.5 },
     { minFrameConfirmations: 0 },
     { minFrameConfirmations: 2.5 },
+    { minFrameConfirmations: FRAME_CONFIRMATION_WINDOW + 1 },
   ])('rejects %j', (options) => {
     expect(() => resolveScannerOptions(options)).toThrow(InvalidOptionsError);
   });
