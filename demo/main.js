@@ -18,6 +18,7 @@ import { ResultsList } from './ui/results-list.js';
 import { StatusBanner, StatusTone } from './ui/status-banner.js';
 
 const DETECTED_HIGHLIGHT_MS = 400;
+const TRANSIENT_MESSAGE_MS = 4000;
 
 /**
  * User-facing explanation per error code; other errors show their own message.
@@ -107,7 +108,14 @@ function highlightDetection() {
 
 store.subscribe((results) => resultsList.render(results));
 scanner.on(ScannerEvent.StateChange, (state) => controls.setState(state));
-scanner.on(ScannerEvent.Error, (error) => status.show(describeError(error), StatusTone.Error));
+scanner.on(ScannerEvent.Error, (error) => {
+  // Still scanning means the error was recoverable (e.g. one bad frame): show it briefly.
+  if (scanner.state === ScannerState.Scanning) {
+    status.flash(describeError(error), StatusTone.Warning, TRANSIENT_MESSAGE_MS);
+  } else {
+    status.show(describeError(error), StatusTone.Error);
+  }
+});
 scanner.on(ScannerEvent.Detect, (result) => {
   store.add(result);
   highlightDetection();

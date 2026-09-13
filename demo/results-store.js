@@ -7,22 +7,25 @@
  * - When storage cannot hold the history (unavailable, blocked, quota exceeded), the in-memory
  *   history stays authoritative: changes from other tabs are merged into it instead of replacing
  *   it, and saving is retried on every change.
- * - "Clear" is recorded as a point in time (`clearedAt`), not just an empty list. A merge can then
- *   tell a cleared scan from one another tab has not seen yet: scans made before the latest clear
- *   are dropped, later ones are kept — whichever tab cleared.
- * - History saved by earlier versions (a plain array) is read, and corrupted data is ignored.
+ * - "Clear" increments a generation counter, and every scan is tagged with the generation it was
+ *   made in. Merges keep only the newest generation, so a clear is never undone, and no clock is
+ *   involved. When a tab clears while another tab holds scans it has not seen, the clear wins.
+ * - History is stored under a versioned key. The previous format (a plain array under the v1
+ *   key) is read once for migration but never written, so older builds keep their own data.
  *
- * @typedef {{ readonly id: string, readonly text: string, readonly timestamp: number }} StoredResult
- * @typedef {{ readonly clearedAt: number, readonly results: readonly StoredResult[] }} History
+ * @typedef {{ readonly id: string, readonly text: string, readonly timestamp: number, readonly generation: number }} StoredResult
+ * @typedef {{ readonly generation: number, readonly results: readonly StoredResult[] }} History
  * @typedef {(results: readonly StoredResult[]) => void} ResultsListener
  * @typedef {Pick<EventTarget, 'addEventListener' | 'removeEventListener'>} StorageEventSource
  */
 
-export const STORAGE_KEY = 'code39-scanner:results:v1';
+export const STORAGE_KEY = 'code39-scanner:results:v2';
+/** Where earlier versions stored a plain array. Read for migration only; never written. */
+export const LEGACY_STORAGE_KEY = 'code39-scanner:results:v1';
 export const MAX_RESULTS = 500;
 
 /** @type {History} */
-const EMPTY_HISTORY = Object.freeze({ clearedAt: 0, results: Object.freeze([]) });
+const EMPTY_HISTORY = Object.freeze({ generation: 0, results: Object.freeze([]) });
 
 /** @returns {Storage | null} */
 function getLocalStorage() {
@@ -34,55 +37,83 @@ function getLocalStorage() {
   }
 }
 
-/** @param {unknown} value @returns {value is StoredResult} */
-function isStoredResult(value) {
-  if (typeof value !== 'object' || value === null) return false;
-  const entry = /** @type {Record<string, unknown>} */ (value);
+/** @param {unknown} value @returns {value is Record<string, unknown>} */
+const isRecord = (value) => typeof value === 'object' && value !== null;
+
+/** @param {unknown} value @returns {value is number} */
+const isGeneration = (value) => Number.isInteger(value) && /** @type {number} */ (value) >= 0;
+
+/**
+ * A scan entry from either storage format (the generation is checked separately).
+ *
+ * @param {unknown} value
+ * @returns {value is { id: string, text: string, timestamp: number }}
+ */
+function isScanEntry(value) {
   return (
-    typeof entry.id === 'string' &&
-    typeof entry.text === 'string' &&
-    typeof entry.timestamp === 'number' &&
-    Number.isFinite(entry.timestamp)
+    isRecord(value) &&
+    typeof value.id === 'string' &&
+    typeof value.text === 'string' &&
+    typeof value.timestamp === 'number' &&
+    Number.isFinite(value.timestamp)
   );
 }
 
 /**
- * Normalized history: only scans made after the clear, capped, frozen. Order is preserved.
+ * Normalized history: only entries of `generation`, capped, frozen. Order is preserved.
  *
- * @param {number} clearedAt
+ * @param {number} generation
  * @param {readonly StoredResult[]} results Newest first.
  * @returns {History}
  */
-function createHistory(clearedAt, results) {
+function createHistory(generation, results) {
   return Object.freeze({
-    clearedAt,
+    generation,
     results: Object.freeze(
       results
-        .filter((entry) => entry.timestamp > clearedAt)
+        .filter((entry) => entry.generation === generation)
         .slice(0, MAX_RESULTS)
-        .map(({ id, text, timestamp }) => Object.freeze({ id, text, timestamp })),
+        .map(({ id, text, timestamp }) => Object.freeze({ id, text, timestamp, generation })),
     ),
   });
 }
 
 /**
- * Parses stored history: the current `{ clearedAt, results }` shape or a legacy plain array.
+ * An entry of the current format: a scan entry tagged with its generation.
+ *
+ * @param {unknown} value
+ * @returns {value is StoredResult}
+ */
+const isStoredResult = (value) =>
+  isRecord(value) && isGeneration(value.generation) && isScanEntry(value);
+
+/**
+ * Parses the current `{ generation, results }` format.
  *
  * @param {unknown} data
  * @returns {History | null} `null` for unrecognized data.
  */
 function parseHistory(data) {
-  if (Array.isArray(data)) return createHistory(0, data.filter(isStoredResult));
-  if (typeof data !== 'object' || data === null) return null;
-  const { clearedAt, results } = /** @type {Record<string, unknown>} */ (data);
-  if (typeof clearedAt !== 'number' || !Number.isFinite(clearedAt) || !Array.isArray(results)) {
+  if (!isRecord(data) || !isGeneration(data.generation) || !Array.isArray(data.results)) {
     return null;
   }
-  return createHistory(clearedAt, results.filter(isStoredResult));
+  return createHistory(data.generation, data.results.filter(isStoredResult));
 }
 
 /**
- * Union of two histories by id, honouring the later of their clears.
+ * Parses the legacy format: a plain array of scans, all in generation 0.
+ *
+ * @param {unknown} data
+ * @returns {History}
+ */
+function parseLegacyHistory(data) {
+  if (!Array.isArray(data)) return EMPTY_HISTORY;
+  const entries = data.filter(isScanEntry).map((entry) => ({ ...entry, generation: 0 }));
+  return createHistory(0, entries);
+}
+
+/**
+ * Union of two histories by id, keeping only the newest generation.
  *
  * @param {History} ours
  * @param {History} theirs
@@ -93,7 +124,7 @@ function mergeHistories(ours, theirs) {
   const byId = new Map();
   for (const entry of [...theirs.results, ...ours.results]) byId.set(entry.id, entry);
   const newestFirst = [...byId.values()].sort((a, b) => b.timestamp - a.timestamp);
-  return createHistory(Math.max(ours.clearedAt, theirs.clearedAt), newestFirst);
+  return createHistory(Math.max(ours.generation, theirs.generation), newestFirst);
 }
 
 /** @returns {string} */
@@ -115,7 +146,8 @@ export class ResultsStore {
 
   /** @param {Event} event */
   #onStorage = (event) => {
-    // `key` is null when another tab cleared all of storage.
+    // `key` is null when another tab cleared all of storage. Writes by older builds to the
+    // legacy key are ignored.
     const { key } = /** @type {StorageEvent} */ (event);
     if (key !== STORAGE_KEY && key !== null) return;
     const stored = this.#readStorage();
@@ -149,18 +181,18 @@ export class ResultsStore {
 
   /** @param {{ text: string, timestamp: number }} result @returns {StoredResult} */
   add({ text, timestamp }) {
-    const entry = Object.freeze({ id: createId(), text, timestamp });
     // Build on the shared history only while storage mirrors ours; otherwise ours is newer.
     const base = (this.#inSync && this.#readStorage()) || this.#history;
-    this.#write(createHistory(base.clearedAt, [entry, ...base.results]));
+    const entry = Object.freeze({ id: createId(), text, timestamp, generation: base.generation });
+    this.#write(createHistory(base.generation, [entry, ...base.results]));
     return entry;
   }
 
-  /** Removes every scan made up to now, in all tabs. */
+  /** Removes every scan made so far, in all tabs. */
   clear() {
     const stored = this.#readStorage();
-    const clearedAt = Math.max(Date.now(), this.#history.clearedAt, stored?.clearedAt ?? 0);
-    this.#write(createHistory(clearedAt, []));
+    const generation = Math.max(this.#history.generation, stored?.generation ?? 0) + 1;
+    this.#write(createHistory(generation, []));
   }
 
   /** Calls `listener` now and after every change. @param {ResultsListener} listener */
@@ -181,7 +213,9 @@ export class ResultsStore {
     if (!this.#storage) return null;
     try {
       const raw = this.#storage.getItem(STORAGE_KEY);
-      return raw === null ? EMPTY_HISTORY : parseHistory(JSON.parse(raw));
+      if (raw !== null) return parseHistory(JSON.parse(raw));
+      const legacy = this.#storage.getItem(LEGACY_STORAGE_KEY);
+      return legacy === null ? EMPTY_HISTORY : parseLegacyHistory(JSON.parse(legacy));
     } catch {
       return null;
     }
