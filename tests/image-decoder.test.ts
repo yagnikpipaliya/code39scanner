@@ -1,0 +1,156 @@
+import { describe, expect, it } from 'vitest';
+import { InvalidOptionsError } from '../src/errors.js';
+import { Code39ImageDecoder, decodeImage } from '../src/image/image-decoder.js';
+import { toGrayscale } from '../src/image/luminance.js';
+import { binarizeLine } from '../src/image/scanline-binarizer.js';
+import type { RgbaImage } from '../src/types.js';
+import { renderBarcode, renderNoise, rotate180, rotate90, toFullAscii } from './helpers/encode.js';
+
+const TEXT = 'CODE39-TEST';
+
+describe('decodeImage', () => {
+  // ~1.5 px per narrow element is the documented minimum: below it, a narrow space between two
+  // bars no longer reaches light level in any pixel (sampling limit), so edges cannot be resolved.
+  it.each([1.5, 2, 3, 4, 8])('decodes at %spx narrow width', (narrow) => {
+    expect(decodeImage(renderBarcode(TEXT, { narrow }))?.text).toBe(TEXT);
+  });
+
+  it.each([2, 2.5, 3])('decodes with ratio %s', (ratio) => {
+    expect(decodeImage(renderBarcode(TEXT, { narrow: 2, ratio }))?.text).toBe(TEXT);
+  });
+
+  it('decodes a noisy, blurred, low-contrast image', () => {
+    const image = renderBarcode(TEXT, {
+      narrow: 3,
+      light: 170,
+      dark: 90,
+      noise: 12,
+      blur: 2,
+      seed: 42,
+    });
+    expect(decodeImage(image)?.text).toBe(TEXT);
+  });
+
+  it('decodes under strongly uneven illumination', () => {
+    const image = renderBarcode(TEXT, { narrow: 3, gradient: 0.7, margin: 40 });
+    expect(decodeImage(image)?.text).toBe(TEXT);
+  });
+
+  it('decodes a barcode inside a large margin', () => {
+    const image = renderBarcode('M', { narrow: 3, margin: 300, height: 200, barHeight: 0.3 });
+    expect(decodeImage(image)?.text).toBe('M');
+  });
+
+  it('decodes upside-down (180°)', () => {
+    expect(decodeImage(rotate180(renderBarcode(TEXT, { narrow: 2 })))?.text).toBe(TEXT);
+  });
+
+  it('decodes vertical barcodes (90°)', () => {
+    const image = rotate90(renderBarcode(TEXT, { narrow: 2 }));
+    expect(decodeImage(image)?.text).toBe(TEXT);
+    expect(decodeImage(image, { orientations: ['horizontal'] })).toBeNull();
+  });
+
+  it('decodes Full ASCII when enabled', () => {
+    const image = renderBarcode(toFullAscii('abc@123'), { narrow: 2 });
+    expect(decodeImage(image, { fullAscii: true })?.text).toBe('abc@123');
+  });
+
+  it('returns null for blank and noise images', () => {
+    const blank: RgbaImage = {
+      width: 200,
+      height: 100,
+      data: new Uint8ClampedArray(200 * 100 * 4).fill(200),
+    };
+    expect(decodeImage(blank)).toBeNull();
+    expect(decodeImage(renderNoise(400, 300))).toBeNull();
+  });
+
+  it('requires minConfirmations agreeing scanlines', () => {
+    // A 2px-tall barcode is crossed by exactly two of 100 horizontal scanlines.
+    const thin = renderBarcode(TEXT, { narrow: 2, height: 100, barHeight: 0.03 });
+    const options = { orientations: ['horizontal'], scanLines: 100 } as const;
+    expect(decodeImage(thin, { ...options, minConfirmations: 3 })).toBeNull();
+    expect(decodeImage(thin, { ...options, minConfirmations: 2 })?.text).toBe(TEXT);
+  });
+
+  it('validates image input', () => {
+    expect(() => decodeImage({ width: 10, height: 10, data: new Uint8ClampedArray(10) })).toThrow(
+      TypeError,
+    );
+    expect(() => decodeImage(null as unknown as RgbaImage)).toThrow(TypeError);
+  });
+
+  it('validates options', () => {
+    expect(() => new Code39ImageDecoder({ scanLines: 0 })).toThrow(InvalidOptionsError);
+    expect(() => new Code39ImageDecoder({ orientations: [] })).toThrow(InvalidOptionsError);
+    expect(() => new Code39ImageDecoder({ orientations: ['diagonal' as 'horizontal'] })).toThrow(
+      InvalidOptionsError,
+    );
+    expect(() => new Code39ImageDecoder({ scanLines: 2, minConfirmations: 5 })).toThrow(
+      InvalidOptionsError,
+    );
+  });
+});
+
+describe('Code39ImageDecoder.decodeAll', () => {
+  it('finds two different barcodes in one image', () => {
+    const top = renderBarcode('TOP', { narrow: 2, height: 60, barHeight: 0.9 });
+    const bottom = renderBarcode('BOTTOM', { narrow: 2, height: 60, barHeight: 0.9 });
+    const width = Math.max(top.width, bottom.width);
+    const data = new Uint8ClampedArray(width * 120 * 4).fill(230);
+    const blit = (img: RgbaImage, offsetY: number) => {
+      for (let y = 0; y < img.height; y++) {
+        const src = img.data.subarray(y * img.width * 4, (y + 1) * img.width * 4);
+        data.set(src, (y + offsetY) * width * 4);
+      }
+    };
+    blit(top, 0);
+    blit(bottom, 60);
+    const texts = new Code39ImageDecoder({ orientations: ['horizontal'] })
+      .decodeAll({ width, height: 120, data })
+      .map((r) => r.text)
+      .sort();
+    expect(texts).toEqual(['BOTTOM', 'TOP']);
+  });
+});
+
+describe('binarizeLine', () => {
+  it('returns null for flat or tiny lines', () => {
+    expect(binarizeLine(new Uint8Array(100).fill(128))).toBeNull();
+    expect(binarizeLine([0, 255])).toBeNull();
+  });
+
+  it('always starts and ends with a light run', () => {
+    const line = new Uint8Array(40).fill(20);
+    line.fill(230, 5, 35);
+    const runs = binarizeLine(line)!;
+    expect(runs).toHaveLength(5);
+    expect(runs[0]).toBe(0);
+    expect(runs[4]).toBe(0);
+    expect(runs[1]).toBeCloseTo(5, 0);
+    expect(runs[3]).toBeCloseTo(5, 0);
+    expect(runs.reduce((a, b) => a + b, 0)).toBeCloseTo(40, 5);
+  });
+
+  it('classifies regions without local contrast as light (quiet zones, margins)', () => {
+    // Dark areas farther than the window radius from any edge have no local reference.
+    const line = new Uint8Array(200).fill(20);
+    line.fill(230, 100, 200);
+    const runs = binarizeLine(line)!;
+    expect(runs).toHaveLength(3);
+    expect(runs[1]).toBeGreaterThan(0);
+    // Only the dark pixels within the window radius (round(200/16) = 13) of the edge stay dark,
+    // plus up to 1px of smoothing-kernel spread and half a pixel of edge interpolation.
+    expect(runs[1]).toBeLessThanOrEqual(13 + 1 + 0.5);
+  });
+
+  it('places edges with sub-pixel precision', () => {
+    const { data, width } = toGrayscale(
+      renderBarcode('A', { narrow: 1.5, height: 3, barHeight: 1 }),
+    );
+    const runs = binarizeLine(data.subarray(width, 2 * width))!;
+    const narrowBars = runs.filter((w, i) => i % 2 === 1 && w < 2.5);
+    for (const w of narrowBars) expect(w).toBeCloseTo(1.5, 0);
+  });
+});
