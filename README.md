@@ -1,398 +1,287 @@
-# code39-scanner
+# Code 39 Scanner
 
-Zero-dependency **Code 39** barcode scanning for the browser: live camera scanning and still-image
-decoding, written in TypeScript and shipped as standard ES modules with type definitions.
+A zero-dependency Code 39 barcode scanner for the browser, written in TypeScript. It opens the
+device camera, reads Code 39 barcodes in real time and lists the scanned values below the camera
+preview. Everything runs on the device: no server, no third-party library, no data leaves the
+browser.
 
-**[Live demo](https://code39scanner.vercel.app/)** · [Quick start](#quick-start) ·
-[API reference](#api-reference) · [How it works](#how-it-works) · [Development](#development)
+**Live demo:** [code39scanner.vercel.app](https://code39scanner.vercel.app/)  
+**Repository:** [github.com/yagnikpipaliya/code39scanner](https://github.com/yagnikpipaliya/code39scanner)
 
-## Table of contents
+## At a glance
 
-- [Features](#features)
-- [Requirements](#requirements)
-- [Installation](#installation)
-- [Quick start](#quick-start)
-- [Usage](#usage)
-- [API reference](#api-reference)
-- [How it works](#how-it-works)
-- [Limitations](#limitations)
-- [Development](#development)
-- [Deployment](#deployment)
-- [License](#license)
+| Item                 | Details                                                                  |
+| -------------------- | ------------------------------------------------------------------------ |
+| Runtime dependencies | None. Image processing, decoding and camera handling are all in-house.   |
+| Language             | TypeScript (strict), compiled to standard ES2022 modules with type files |
+| Symbology            | Code 39 (43 characters) and optional Full ASCII (all 128 characters)     |
+| Inputs               | Live camera stream, or any still image (RGBA or grayscale)               |
+| Hosting              | Static site on Vercel; the library is packaged as an npm-ready module    |
+| Quality              | 214 unit tests, per-folder coverage thresholds, ESLint and Prettier      |
 
 ## Features
 
-- **Zero runtime dependencies.** Image processing, decoding and camera handling are implemented
-  in this package.
-- **Standard Code 39** (43 characters) and optional **Full ASCII** (all 128 ASCII characters).
-- **Robust decoding.** Local adaptive thresholding (uneven lighting, shadows), sub-pixel edge
-  detection (low resolution, blur), tolerance for print gain, perspective and tilt. It reads
-  barcodes upside-down and in either orientation, and finds several barcodes per frame.
-- **Confirmed reads.** A value is reported only after independent scanlines agree on it, so
-  one-off misreads are not reported. Live scanning can additionally require the value in several
-  recent frames.
-- **Efficient.** Each camera frame is drawn once and only the sampled scanlines are read back.
-- **Production-grade lifecycle.** Rear-camera preference, camera switching, serialized and
-  cancellable start/stop, pausing in background tabs, and automatic shutdown on unrecoverable
-  errors.
-- **Typed errors.** Every error carries a stable, machine-readable `code`.
-- Fully typed, tree-shakeable (`sideEffects: false`), and covered by unit tests.
-
-## Requirements
-
-- A **secure context**: `https://` or `http://localhost`. Browsers only allow camera access
-  there.
-- A browser with `getUserMedia` and Canvas 2D. The library targets ES2022 and uses private
-  class methods, which means Chrome/Edge 84+, Firefox 90+ or Safari 15+.
-- Node.js 20.19+ for development only.
-
-## Installation
-
-The package is not yet published to npm. Install it from Git or a local checkout:
-
-```bash
-npm install github:yagnikpipaliya/code39scanner   # builds dist/ through the "prepare" script
-npm install ../path/to/code39scanner              # local folder; run `npm run build:lib` there first
-```
-
-## Quick start
-
-```html
-<video id="preview" playsinline muted></video>
-<button id="start">Start scanning</button>
-<ul id="results"></ul>
-```
-
-```js
-import { Code39Scanner, ScannerEvent } from 'code39-scanner';
-
-const scanner = new Code39Scanner({ video: document.getElementById('preview') });
-
-scanner.on(ScannerEvent.Detect, ({ text }) => {
-  const item = document.createElement('li');
-  item.textContent = text;
-  document.getElementById('results').prepend(item);
-});
-
-// Camera access must start from a user gesture on iOS.
-document.getElementById('start').addEventListener('click', () => scanner.start());
-```
-
-## Usage
-
-### Live camera scanning
-
-Each barcode is reported **once per appearance**, on the first frame that decodes it (or, with
-`minFrameConfirmations`, once enough recent frames have). A barcode that stays in view is not
-repeated. If it leaves the view for longer than `presenceTimeoutMs` and returns, it is reported
-again.
-
-```js
-const scanner = new Code39Scanner({
-  video: document.getElementById('preview'),
-  fullAscii: true, // expand +A → a, %U → NUL, …
-  minLength: 4, // ignore very short payloads
-});
-
-scanner.on(ScannerEvent.Detect, ({ text, rawText, timestamp }) => {
-  console.log(text, new Date(timestamp));
-});
-scanner.on(ScannerEvent.StateChange, (state) => {
-  console.log('Scanner is', state); // 'idle' | 'starting' | 'scanning'
-});
-```
-
-When the owning view goes away (for example when a component unmounts), call `dispose()`. It
-cancels a pending `start()`, releases the camera, delivers the final `idle` state change, and
-then detaches all listeners. A permission prompt that is already on screen cannot be closed by
-the page; if the user accepts it afterwards, the camera is released at once.
-
-```js
-const scanner = new Code39Scanner({ video });
-scanner.start().catch(handleStartError);
-// …later
-await scanner.dispose();
-```
-
-### Choosing a camera
-
-Browsers reveal camera ids and labels only after permission has been granted, so list cameras
-after the first successful `start()`:
-
-```js
-await scanner.start(); // rear camera preferred
-const cameras = await Code39Scanner.listCameras(); // [{ deviceId, label }]
-await scanner.switchCamera(cameras[1].deviceId);
-```
-
-### Decoding still images
-
-```js
-import { Code39ImageDecoder, decodeImage } from 'code39-scanner';
-
-const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
-
-decodeImage(imageData); // → { text, rawText, format } | null
-
-const decoder = new Code39ImageDecoder({ fullAscii: true }); // reuse for many images
-decoder.decodeAll(imageData); // → every barcode in the image
-```
-
-### Handling errors
-
-Every error thrown or emitted by the package extends `Code39ScannerError` and has a stable
-`code`. Branch on the code, not on the message or the class name:
-
-```js
-import { Code39ScannerError, ErrorCode, ScannerEvent, ScannerState } from 'code39-scanner';
-
-try {
-  await scanner.start();
-} catch (error) {
-  if (!(error instanceof Code39ScannerError)) throw error;
-  switch (error.code) {
-    case ErrorCode.OperationCancelled:
-      break; // stop() or dispose() was called while starting; nothing to report
-    case ErrorCode.PermissionDenied:
-      showMessage('Please allow camera access.');
-      break;
-    default:
-      showMessage(error.message);
-  }
-}
-
-// Failures while scanning. If the scanner is still scanning, the error was recoverable
-// (e.g. one bad frame); otherwise scanning has stopped (e.g. the camera was unplugged).
-scanner.on(ScannerEvent.Error, (error) => {
-  const recoverable = scanner.state === ScannerState.Scanning;
-  showMessage(`${error.code}: ${error.message}`, { persistent: !recoverable });
-});
-```
-
-## API reference
-
-### `Code39Scanner`
-
-```ts
-new Code39Scanner(options: Code39ScannerOptions)
-```
-
-| Option                  | Type                | Default | Description                                                                            |
-| ----------------------- | ------------------- | ------- | -------------------------------------------------------------------------------------- |
-| `video`                 | `HTMLVideoElement`  | —       | Element showing the camera preview. Required unless `frameSource` is given.            |
-| `frameSource`           | `FrameSource`       | camera  | Custom frame provider that replaces the built-in camera.                               |
-| `fullAscii`             | `boolean`           | `false` | Expand Full ASCII shift sequences. See [Full ASCII](#full-ascii).                      |
-| `minLength`             | `number`            | `1`     | Minimum number of data characters.                                                     |
-| `minQuietZone`          | `number`            | `5`     | Required blank margin on each side, in narrow-bar widths (the spec requires 10).       |
-| `scanLines`             | `number`            | `24`    | Primary scanlines sampled per orientation per frame.                                   |
-| `orientations`          | `ScanOrientation[]` | both    | Scan directions.                                                                       |
-| `minConfirmations`      | `number`            | `2`     | Independent scanlines that must agree before a value is reported (up to 10).           |
-| `minFrameConfirmations` | `number`            | `1`     | Frames, out of the last 10, that must decode a value before it is reported (up to 10). |
-| `scanIntervalMs`        | `number`            | `100`   | Minimum delay between frame decodes.                                                   |
-| `presenceTimeoutMs`     | `number`            | `1500`  | Time a barcode must be out of view before it is reported again.                        |
-| `maxFrameSize`          | `number`            | `1920`  | Frames are downscaled so their longest side is at most this many pixels.               |
-
-Invalid options throw `InvalidOptionsError` from the constructor.
-
-| Member                                  | Description                                                                                                                                |
-| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `start({ deviceId? }): Promise<void>`   | Opens the camera (rear preferred) and starts scanning. No-op when already scanning that camera.                                            |
-| `switchCamera(deviceId): Promise<void>` | Restarts on another camera. The state goes `scanning → starting → scanning`.                                                               |
-| `stop(): Promise<void>`                 | Stops scanning and releases the camera. A pending `start()` rejects with `OperationCancelled`; a camera it gets later is released at once. |
-| `dispose(): Promise<void>`              | Stops (listeners still receive the final `idle`), then detaches all listeners.                                                             |
-| `on(event, listener): () => void`       | Subscribes to an event and returns an unsubscribe function. `off(event, listener)` also unsubscribes.                                      |
-| `state: ScannerState`                   | `'idle'`, `'starting'` or `'scanning'`.                                                                                                    |
-| `activeDeviceId: string \| undefined`   | Device id of the camera in use.                                                                                                            |
-| `Code39Scanner.isSupported()`           | Whether the browser supports camera scanning: the camera API and a working Canvas 2D context.                                              |
-| `Code39Scanner.listCameras()`           | Available cameras as `{ deviceId, label }`.                                                                                                |
-
-Lifecycle calls are serialized, so overlapping calls such as double clicks are safe. Once a
-listener calls `stop()` or `dispose()`, no further events of that frame are delivered.
-
-| Event                      | Payload                                              |
-| -------------------------- | ---------------------------------------------------- |
-| `ScannerEvent.Detect`      | `ScanResult`: `{ text, rawText, format, timestamp }` |
-| `ScannerEvent.Error`       | `Code39ScannerError` raised while scanning           |
-| `ScannerEvent.StateChange` | `ScannerState`                                       |
-
-**Failure policy.** A frame that fails for an unexpected reason is reported as a
-`FrameProcessingError` (the original error is its `cause`), and scanning continues. Empty frames,
-for example from a camera that is still warming up, are simply skipped. Scanning stops
-automatically in two cases: the error cannot be fixed by retrying (unsupported browser, camera
-unavailable or disconnected, or a frame source producing invalid frames), or 5 processed frames
-in a row fail (ticks without a frame, such as while the page is hidden, do not count). The
-failure is reported once in either case. When an `Error` event arrives, `state` tells the two
-apart: still `scanning` means the error was recoverable, `idle` means scanning stopped. Timing
-uses a monotonic clock, so changes to the system time cannot cause duplicate or missed reports.
-
-### `Code39ImageDecoder` and `decodeImage`
-
-```ts
-new Code39ImageDecoder(options?: ImageDecodeOptions)
-decoder.decode(input: ImageInput, pass?: ScanPassOptions): DecodedBarcode | null
-decoder.decodeAll(input: ImageInput, pass?: ScanPassOptions): DecodedBarcode[]
-decodeImage(input: ImageInput, options?: ImageDecodeOptions): DecodedBarcode | null
-```
-
-`ImageDecodeOptions` is the decoding subset of the scanner options: `fullAscii`, `minLength`,
-`minQuietZone`, `scanLines`, `orientations` and `minConfirmations`. `ScanPassOptions.linePhase`
-(0–1, default `0.5`) shifts the sampled lines within their band. Varying it between calls sweeps
-the whole image, which is what the live scanner does.
-
-`DecodedBarcode` is `{ text, rawText, format }`: `text` is the decoded payload, `rawText` the
-payload as encoded (without the `*` start/stop characters), and `format` is `'CODE_39'`.
-
-#### Full ASCII
-
-With `fullAscii: true`, shift pairs such as `+A` (`a`), `$M` (carriage return) and `%U` (NUL) are
-expanded. Expansion applies to the payload as a whole. If any shift sequence in the payload is
-invalid, the payload is not Full ASCII, and `text` is the unmodified `rawText`. For example,
-`12/34-A` stays `12/34-A`.
-
-### Image input
-
-`ImageInput` is either an RGBA image (`{ width, height, data }` with 4 bytes per pixel, such as
-`ImageData`) or a `LuminanceSource`:
-
-```ts
-interface LuminanceSource {
-  readonly width: number;
-  readonly height: number;
-  row(y: number): Uint8Array; // luminance of one row
-  column(x: number): Uint8Array; // luminance of one column
-}
-```
-
-A `LuminanceSource` lets the decoder read only the lines it samples, without copying whole
-frames. `luminanceFromRgba(image)` and `luminanceFromGray(image)` adapt in-memory images. Use
-`luminanceFromGray` for single-channel images. An empty (0×0) image decodes to no barcode.
-Invalid input throws `InvalidArgumentError` immediately.
-
-### Enums
-
-Enums are frozen objects paired with a union type of the same name, not TypeScript `enum`s.
-They compile to plain JavaScript, are tree-shakeable, and their values are ordinary strings
-(`ScannerState.Idle === 'idle'`).
-
-| Enum              | Members                          |
-| ----------------- | -------------------------------- |
-| `ScannerState`    | `Idle`, `Starting`, `Scanning`   |
-| `ScannerEvent`    | `Detect`, `Error`, `StateChange` |
-| `ScanOrientation` | `Horizontal`, `Vertical`         |
-| `BarcodeFormat`   | `Code39`                         |
-| `ErrorCode`       | See [Errors](#errors)            |
-
-### Errors
-
-| Class                     | `code`                    | Raised when                                                      |
-| ------------------------- | ------------------------- | ---------------------------------------------------------------- |
-| `InvalidOptionsError`     | `INVALID_OPTIONS`         | A constructor receives invalid options.                          |
-| `InvalidArgumentError`    | `INVALID_ARGUMENT`        | A method receives invalid input (image, listener, device id).    |
-| `InsecureContextError`    | `INSECURE_CONTEXT`        | The page is not served over HTTPS or localhost.                  |
-| `UnsupportedBrowserError` | `UNSUPPORTED_BROWSER`     | The camera API or Canvas 2D is unavailable.                      |
-| `PermissionDeniedError`   | `PERMISSION_DENIED`       | The user or a browser policy denied camera access.               |
-| `CameraUnavailableError`  | `CAMERA_UNAVAILABLE`      | No camera was found, the camera is busy, or the stream ended.    |
-| `OperationCancelledError` | `OPERATION_CANCELLED`     | A start was cancelled by a later `stop()`, `dispose()` or start. |
-| `FrameProcessingError`    | `FRAME_PROCESSING_FAILED` | A camera frame could not be processed (see `cause`).             |
-
-All of them extend `Code39ScannerError`, and every `name` is a string literal, so it is not
-changed by minification.
-
-### Building blocks
-
-For custom pipelines the package also exports:
-
-- `binarizeLine`: turns a luminance line into bar/space widths.
-- `Code39WidthDecoder`: turns bar/space widths into text; `decodeSymbols` also returns each
-  symbol's module (narrow-bar) width.
-- `expandFullAscii`, `toGrayscale` and `toLuminanceSource`.
-- `PresenceTracker`: the once-per-appearance and frame-confirmation logic.
-- `CameraFrameSource`: the camera implementation of `FrameSource`.
+- **Robust decoding.** Local adaptive thresholding handles uneven lighting and shadows. Sub-pixel
+  edge detection handles low resolution and blur. Wide tolerances absorb print gain, perspective
+  and tilt. Barcodes are read in either orientation, upside down, and several per frame.
+- **Confirmed reads.** A value is reported only after several independent scanlines agree on it,
+  so one-off misreads caused by noise or printed text are never reported.
+- **Once per appearance.** A barcode that stays in view is reported once. It is reported again
+  only after it has been out of view for a configurable time.
+- **Efficient.** Each camera frame is drawn once, and only the sampled scanlines are read back
+  from the canvas. The scanlines shift every frame, so over a few frames they sweep the whole
+  image.
+- **Safe lifecycle.** The rear camera is preferred and cameras can be switched. Start and stop
+  calls are serialized and cancellable, so double clicks cannot leave the camera on. Scanning
+  pauses in background tabs and shuts down on unrecoverable errors.
+- **Typed errors.** Every error has a stable, machine-readable code.
 
 ## How it works
 
+Each camera frame goes through the decoding pipeline below.
+
+```mermaid
+flowchart TD
+    A["Camera frame"] --> B["Canvas<br/>drawn once, downscaled to the maximum frame size"]
+    B --> C["Scanlines<br/>horizontal and vertical, from the center outwards,<br/>shifted a little every frame"]
+    C --> D["Binarizer<br/>smoothing, local adaptive threshold,<br/>sub-pixel bar and space widths"]
+    D --> E["Width decoder<br/>9-element characters, start and stop characters,<br/>quiet zones, both reading directions"]
+    E --> F["Walk along the bars<br/>to collect supporting scanlines"]
+    F --> G{"Enough independent<br/>scanlines agree?"}
+    G -- no --> X["Ignored"]
+    G -- yes --> H{"Seen in enough<br/>recent frames?"}
+    H -- no --> X
+    H -- yes --> I{"New appearance?"}
+    I -- no, still in view --> X
+    I -- yes --> J(["Detect event"])
 ```
-camera frame ──► drawn once to a canvas
-             ──► primary scanlines, center-out, in both orientations
-                 (their position shifts every frame, sweeping the whole image)
-             ──► per line: luminance ─► adaptive threshold ─► sub-pixel bar/space widths
-             ──► width decoder: characters, start/stop "*", quiet zones, both directions
-             ──► confirmation by independent scanlines (walking along the bars)
-             ──► optional confirmation across frames ─► presence tracker ─► Detect event
+
+**Confirmation.** A value must be decoded by a minimum number of scanlines that are at least
+three narrow-bar widths apart. Lines that close together still fit on a tilted barcode, but
+they are far enough apart that a pattern appearing on a single pixel row is not confirmed by its
+own neighbours. When one scanline decodes a value, the decoder walks along the bars in both
+directions until the value stops decoding, so even a barcode crossed by only one sampled line
+can be confirmed. Labels with the same text but clearly different sizes are confirmed
+separately.
+
+**Frame confirmation.** Optionally, a value must also appear in a number of the last 10 frames
+before it is reported. Misses in between do not reset the count, so small barcodes that the
+moving scanlines cross only now and then still confirm.
+
+**Presence tracking.** Once reported, a barcode is remembered while it stays in view. It is
+reported again only after it has been absent for longer than the presence timeout. Timing uses
+a monotonic clock, so changes to the system time cannot cause duplicate or missed reports.
+
+## Scanner lifecycle
+
+```mermaid
+stateDiagram-v2
+    [*] --> Idle
+    Idle --> Starting: start
+    Starting --> Scanning: camera ready
+    Starting --> Idle: start failed, stop or dispose
+    Scanning --> Starting: switch camera
+    Scanning --> Idle: stop, dispose or unrecoverable error
 ```
 
-**Confirmation.** A value must be decoded by `minConfirmations` scanlines that are at least three
-narrow-bar widths apart. That is close enough for a tilted barcode to fit, and far enough that a
-pattern decoding on a single pixel row (sensor noise, a stroke of text) is not confirmed by its
-immediate neighbours. Lines that measure one barcode slightly differently (tilt, blur) count
-together; labels with the same text but clearly different sizes are confirmed separately. When a
-scanline decodes a value, the decoder walks along the bars in both directions until the value
-stops decoding, so a barcode crossed by a single sampled line still confirms.
+**Failure policy.**
 
-When scanning live, `minFrameConfirmations` can additionally require the value in that many of
-the last 10 frames (`FRAME_CONFIRMATION_WINDOW`). Misses in between do not reset the count, so
-small barcodes that the moving scanlines cross only in some frames still confirm, and it counts
-frames rather than time, so it works with any `presenceTimeoutMs`. A barcode that has left the
-view must be confirmed again when it returns.
+- A frame that fails for an unexpected reason is reported as an error, and scanning continues.
+- Empty frames, for example while the camera warms up, are skipped silently.
+- Scanning stops automatically in two cases, and the failure is reported once:
+  - the error cannot be fixed by retrying: an unsupported browser, a camera that is missing,
+    busy or unplugged, or invalid frames
+  - five processed frames in a row fail
 
-**Source layout.** `src/core` holds the symbology table, width decoder and Full ASCII.
-`src/image` holds luminance sources, the binarizer and the image decoder. `src/camera` holds the
-frame source abstraction, camera implementation, presence tracker and scanner.
+When an error is reported, the scanner state tells the two cases apart: still scanning means the
+error was recoverable, idle means scanning has stopped.
+
+## The demo website
+
+```mermaid
+sequenceDiagram
+    actor User
+    participant Page as Demo page
+    participant Scanner as Code39Scanner
+    participant Camera
+    participant Store as Scan history
+    User->>Page: Start scanning
+    Page->>Scanner: start
+    Scanner->>Camera: request rear camera
+    Camera-->>Scanner: video stream
+    loop every 100 ms
+        Scanner->>Scanner: decode current frame
+    end
+    Scanner-->>Page: detect event
+    Page->>Store: save scan
+    Store-->>Page: updated list, newest first
+```
+
+- **Start and stop** with a single button. The camera is released when the page is closed or
+  hidden.
+- **Camera picker.** It lists the available cameras once permission has been granted.
+- **Live feedback.** A "Live" badge, a scan guide with a moving laser line, and a green flash
+  when a barcode is detected.
+- **Results list.** The newest scans appear first, each with its time and a copy button, plus a
+  "Clear all" action.
+- **Saved history.** Up to 500 scans are kept in the browser's local storage and stay in sync
+  across open tabs. A clear in one tab clears every tab.
+- **Friendly errors.** There are clear messages for denied permission, insecure (non-HTTPS)
+  pages, unsupported browsers and busy cameras.
+- **Light and dark themes.** The page follows the system setting.
+
+## Project structure
+
+```mermaid
+flowchart TD
+    subgraph Demo["demo — website"]
+        main["main.js<br/>composition root"]
+        ui["ui.js<br/>view components"]
+        store["results-store.js<br/>saved history"]
+    end
+    subgraph Camera["src/camera — live scanning"]
+        scanner["scanner.ts"]
+        source["camera-frame-source.ts"]
+        tracker["presence-tracker.ts"]
+    end
+    subgraph Image["src/image — image processing"]
+        decoder["image-decoder.ts"]
+        binarizer["scanline-binarizer.ts"]
+        luminance["luminance.ts"]
+    end
+    subgraph Core["src/core — symbology"]
+        width["width-decoder.ts"]
+        symbology["symbology.ts"]
+    end
+    main --> ui
+    main --> store
+    main --> api["index.ts — public API"]
+    api --> scanner
+    scanner --> source
+    scanner --> tracker
+    scanner --> decoder
+    source --> luminance
+    decoder --> binarizer
+    decoder --> luminance
+    decoder --> width
+    width --> symbology
+```
+
+| Location         | Contents                                                                             |
+| ---------------- | ------------------------------------------------------------------------------------ |
+| src/core         | Code 39 character patterns, Full ASCII expansion and the bar-width decoder           |
+| src/image        | Luminance sources, the scanline binarizer and the whole-image decoder                |
+| src/camera       | The camera frame source, the presence tracker and the live scanner                   |
+| src (root files) | Shared types, options and validation, typed errors, the event emitter, small helpers |
+| demo             | The website: page markup, styles, composition root, view components and scan history |
+| tests            | Unit tests, plus a test-only Code 39 encoder and synthetic image renderer            |
+
+**Imports.** Imports use absolute paths from the project root: the @ prefix points to src, @demo
+to demo, and @tests to tests. Editors can follow them with Ctrl+Click. The library build rewrites
+them to relative paths, so the packaged output works anywhere without extra configuration.
+
+**Design principles.** Each module has one responsibility. The scanner depends on a frame
+source abstraction rather than on the camera directly, so tests and other inputs can supply
+frames. There is one source of truth for character patterns, option defaults and valid ranges.
+Invalid input is rejected at the public boundary with a typed error.
+
+## Configuration
+
+All options are optional and are validated when the scanner is created. The only other
+requirement is a video element for the preview, or a custom frame source instead.
+
+| Option                | Default | Meaning                                                                         |
+| --------------------- | ------- | ------------------------------------------------------------------------------- |
+| fullAscii             | off     | Expand Full ASCII shift pairs, for example +A becomes a lowercase a             |
+| minLength             | 1       | Minimum number of data characters                                               |
+| minQuietZone          | 5       | Blank margin required on each side, in narrow-bar widths (the spec requires 10) |
+| scanLines             | 24      | Primary scanlines sampled per direction per frame                               |
+| orientations          | both    | Scan horizontally, vertically, or both                                          |
+| minConfirmations      | 2       | Independent scanlines that must agree on a value (1 to 10)                      |
+| minFrameConfirmations | 1       | Frames, out of the last 10, that must contain the value (1 to 10)               |
+| scanIntervalMs        | 100     | Minimum time between two decoded frames, in milliseconds                        |
+| presenceTimeoutMs     | 1500    | Time a barcode must be out of view before it is reported again                  |
+| maxFrameSize          | 1920    | Longest side of a frame after downscaling, in pixels                            |
+
+## Events
+
+| Event       | When it fires                                         | Payload                                                |
+| ----------- | ----------------------------------------------------- | ------------------------------------------------------ |
+| detect      | A confirmed barcode comes into view                   | Decoded text, raw text, format and detection timestamp |
+| error       | Something fails while scanning                        | A typed error with a stable code                       |
+| statechange | The scanner moves between idle, starting and scanning | The new state                                          |
+
+## Errors
+
+| Code                    | Raised when                                                  |
+| ----------------------- | ------------------------------------------------------------ |
+| INVALID_OPTIONS         | The scanner or decoder receives invalid options              |
+| INVALID_ARGUMENT        | A method receives invalid input, such as a malformed image   |
+| INSECURE_CONTEXT        | The page is not served over HTTPS or localhost               |
+| UNSUPPORTED_BROWSER     | The camera API or Canvas 2D is unavailable                   |
+| PERMISSION_DENIED       | The user or a browser policy denied camera access            |
+| CAMERA_UNAVAILABLE      | No camera was found, the camera is busy, or the stream ended |
+| OPERATION_CANCELLED     | A start was superseded by a later start, stop or dispose     |
+| FRAME_PROCESSING_FAILED | A camera frame could not be processed                        |
+
+## Requirements
+
+- **Secure context.** The page must be served over HTTPS or from localhost; browsers only allow
+  camera access there.
+- **Browser.** Camera access and Canvas 2D, in Chrome or Edge 84+, Firefox 90+ or Safari 15+.
+- **Development only.** Node.js 20.19 or newer.
 
 ## Limitations
 
-- Narrow bars must be at least about **1.5 px** wide in the camera frame. Move closer for small or
-  dense barcodes.
-- A barcode is read only when a scanline crosses it from end to end, so the tilt it tolerates
-  depends on its proportions: just under `atan(bar height ÷ symbol length)`. That is about 8° for
-  bars at the spec minimum of 15% of the length, and more for taller bars. Hold long barcodes with
-  short bars level.
+- Narrow bars must be at least about 1.5 pixels wide in the camera frame. Move closer for small
+  or dense barcodes.
+- A scanline must cross the barcode from end to end, so the tilt it tolerates depends on the
+  barcode's proportions. That is about 8 degrees for bars at the minimum height of 15% of the
+  symbol length, and more for taller bars.
 - Mod 43 check characters are not validated; they are returned as part of the data.
 - Only Code 39 is supported.
 
 ## Development
 
-```bash
-npm install
-npm run dev        # demo at http://localhost:5173 (uses the TypeScript sources)
-```
+The package is not published to npm yet. It can be installed straight from the GitHub
+repository; the install step builds the library automatically.
 
-| Script                  | Purpose                                            |
-| ----------------------- | -------------------------------------------------- |
-| `npm test`              | Unit tests (Vitest)                                |
-| `npm run test:coverage` | Tests with coverage thresholds                     |
-| `npm run typecheck`     | Type-check the library, tests and the demo's JSDoc |
-| `npm run lint`          | ESLint                                             |
-| `npm run format`        | Prettier                                           |
-| `npm run build`         | Library to `dist/`, then the demo to `dist-demo/`  |
-| `npm run preview`       | Serve the production demo build                    |
+| Script        | Purpose                                                                 |
+| ------------- | ----------------------------------------------------------------------- |
+| dev           | Runs the demo at localhost:5173 using the TypeScript sources            |
+| test          | Runs the unit tests once                                                |
+| test:watch    | Runs the unit tests in watch mode                                       |
+| test:coverage | Runs the unit tests with coverage thresholds                            |
+| typecheck     | Type-checks the library, the tests and the demo (checked through JSDoc) |
+| lint          | Runs ESLint                                                             |
+| format        | Formats all files with Prettier; format:check only verifies them        |
+| build         | Builds the library into dist, then the demo into dist-demo              |
+| build:lib     | Compiles the library and rewrites the absolute imports to relative ones |
+| preview       | Serves the production demo build at localhost:4173                      |
+| clean         | Removes build and coverage output                                       |
 
-The production demo imports the compiled `dist/` output, the same way an npm consumer does.
-Mobile browsers block the camera on plain-HTTP LAN addresses, so to test on a phone during
-development, serve the page over HTTPS (for example through a tunnel).
-
-```
-src/        library
-  core/     symbology, width decoder, Full ASCII
-  image/    luminance sources, binarizer, image decoder
-  camera/   frame source, camera source, presence tracker, scanner
-  utils/    enum helpers
-demo/       demo site (vanilla JavaScript, type-checked through JSDoc)
-tests/      unit tests and a synthetic barcode renderer
-```
+The production demo is built against the compiled library in dist, exactly the way an npm
+consumer would use it. Mobile browsers block the camera on plain-HTTP network addresses, so to
+test on a phone during development, serve the page over HTTPS, for example through a tunnel.
 
 ## Deployment
 
-The demo is deployed on Vercel at **https://code39scanner.vercel.app/**. `vercel.json` defines
-the build (`npm run build`), the output directory (`dist-demo`) and security headers, including
-`Permissions-Policy: camera=(self)`.
+The demo is deployed on Vercel at
+[code39scanner.vercel.app](https://code39scanner.vercel.app/). The Vercel configuration installs
+dependencies with a clean install, runs the full build, and publishes the dist-demo folder.
+Every page is served with these security headers:
 
-To deploy your own copy, import the repository in Vercel (**Add New → Project**) and keep the
-detected settings, or run:
+| Header                 | Value                                                          |
+| ---------------------- | -------------------------------------------------------------- |
+| Permissions-Policy     | Camera for this site only; microphone and geolocation disabled |
+| X-Content-Type-Options | nosniff                                                        |
+| X-Frame-Options        | DENY                                                           |
+| Referrer-Policy        | strict-origin-when-cross-origin                                |
 
-```bash
-npx vercel --prod
-```
+Built assets have content-hashed names and are cached for one year.
+
+To deploy a copy, import the repository in Vercel as a new project and keep the detected
+settings.
 
 ## License
 

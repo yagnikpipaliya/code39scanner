@@ -1,4 +1,4 @@
-import { defineEnum, type EnumValue } from './utils/enum.js';
+import { defineEnum, type EnumValue } from '@/utils.js';
 
 /** Stable, machine-readable error identifiers (safe to switch on or map to messages). */
 export const ErrorCode = defineEnum({
@@ -61,6 +61,14 @@ export class CameraUnavailableError extends Code39ScannerError {
 export class OperationCancelledError extends Code39ScannerError {
   override readonly name = 'OperationCancelledError';
   readonly code = ErrorCode.OperationCancelled;
+
+  /** `operation` (e.g. "Camera start") was superseded; `cause` is what it failed with, if anything. */
+  static superseded(operation: string, cause?: unknown): OperationCancelledError {
+    return new OperationCancelledError(
+      `${operation} was cancelled by a later start(), stop() or dispose() call.`,
+      { cause },
+    );
+  }
 }
 
 /** A camera frame could not be processed; `cause` holds the original error. */

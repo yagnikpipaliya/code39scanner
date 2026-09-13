@@ -1,29 +1,25 @@
 /**
  * Demo composition root: wires the scanner package to the page. All logic lives in the
- * package and the small single-purpose modules imported below.
+ * package, the results store and the view components imported below.
  */
 import {
   Code39Scanner,
   Code39ScannerError,
   ErrorCode,
-  InsecureContextError,
   ScannerEvent,
   ScannerState,
-  UnsupportedBrowserError,
 } from 'code39-scanner';
-import { ResultsStore } from './results-store.js';
-import { CameraControls } from './ui/camera-controls.js';
-import { byId } from './ui/dom.js';
-import { ResultsList } from './ui/results-list.js';
-import { StatusBanner, StatusTone } from './ui/status-banner.js';
+import { ResultsStore } from '@demo/results-store.js';
+import { CameraControls, requireElement, ResultsList, StatusBanner, StatusTone } from '@demo/ui.js';
 
 const DETECTED_HIGHLIGHT_MS = 400;
 const TRANSIENT_MESSAGE_MS = 4000;
 
 /**
- * User-facing explanation per error code; other errors show their own message.
+ * User-facing explanation per error code, built from the error's own message; codes without an
+ * entry show that message unchanged.
  *
- * @type {Readonly<Partial<Record<import('code39-scanner').ErrorCode, (error: Error) => string>>>}
+ * @type {Readonly<Partial<Record<import('code39-scanner').ErrorCode, (message: string) => string>>>}
  */
 const ERROR_MESSAGES = Object.freeze({
   [ErrorCode.PermissionDenied]: () =>
@@ -32,41 +28,45 @@ const ERROR_MESSAGES = Object.freeze({
     'The camera is only available over HTTPS. Open this page using an https:// address.',
   [ErrorCode.UnsupportedBrowser]: () =>
     'This browser does not support camera access. Try a recent Chrome, Safari, Firefox or Edge.',
-  [ErrorCode.CameraUnavailable]: (error) =>
-    `${error.message} Check that a camera is connected and not in use by another app.`,
+  [ErrorCode.CameraUnavailable]: (message) =>
+    `${message} Check that a camera is connected and not in use by another app.`,
 });
+
+/**
+ * @param {import('code39-scanner').ErrorCode} code
+ * @param {string} message
+ * @returns {string}
+ */
+const messageFor = (code, message) => ERROR_MESSAGES[code]?.(message) ?? message;
+
+/** @param {unknown} error @returns {string} */
+function describeError(error) {
+  if (error instanceof Code39ScannerError) return messageFor(error.code, error.message);
+  return error instanceof Error ? error.message : 'Something went wrong.';
+}
 
 /** A start cancelled by a later stop (e.g. the page was hidden) is expected, not a failure. */
 /** @param {unknown} error */
 const isCancellation = (error) =>
   error instanceof Code39ScannerError && error.code === ErrorCode.OperationCancelled;
 
-/** @param {unknown} error @returns {string} */
-function describeError(error) {
-  if (error instanceof Code39ScannerError) {
-    const describe = ERROR_MESSAGES[error.code];
-    if (describe) return describe(error);
-  }
-  return error instanceof Error ? error.message : 'Something went wrong.';
-}
-
-const viewer = byId('viewer', HTMLElement);
-const status = new StatusBanner(byId('status', HTMLElement));
+const viewer = requireElement('#viewer', HTMLElement);
+const status = new StatusBanner(requireElement('#status', HTMLElement));
 const store = new ResultsStore();
-const scanner = new Code39Scanner({ video: byId('preview', HTMLVideoElement) });
+const scanner = new Code39Scanner({ video: requireElement('#preview', HTMLVideoElement) });
 
 const resultsList = new ResultsList({
-  list: byId('results-list', HTMLOListElement),
-  empty: byId('results-empty', HTMLElement),
-  count: byId('results-count', HTMLElement),
-  clearButton: byId('clear', HTMLButtonElement),
-  template: byId('result-template', HTMLTemplateElement),
+  list: requireElement('#results-list', HTMLOListElement),
+  empty: requireElement('#results-empty', HTMLElement),
+  count: requireElement('#results-count', HTMLElement),
+  clearButton: requireElement('#clear', HTMLButtonElement),
+  template: requireElement('#result-template', HTMLTemplateElement),
   onClear: () => store.clear(),
 });
 
 const controls = new CameraControls({
-  toggle: byId('toggle', HTMLButtonElement),
-  select: byId('camera-select', HTMLSelectElement),
+  toggle: requireElement('#toggle', HTMLButtonElement),
+  select: requireElement('#camera-select', HTMLSelectElement),
   viewer,
   onToggle: () => void (scanner.state === ScannerState.Idle ? start() : scanner.stop()),
   onCameraChange: (deviceId) => void start(deviceId),
@@ -123,12 +123,12 @@ scanner.on(ScannerEvent.Detect, (result) => {
 
 controls.setState(scanner.state);
 const environmentError = !window.isSecureContext
-  ? new InsecureContextError('Insecure context.')
+  ? ErrorCode.InsecureContext
   : !Code39Scanner.isSupported()
-    ? new UnsupportedBrowserError('Camera API unavailable.')
+    ? ErrorCode.UnsupportedBrowser
     : null;
 if (environmentError) {
-  status.show(describeError(environmentError), StatusTone.Error);
+  status.show(messageFor(environmentError, ''), StatusTone.Error);
   controls.disable();
 }
 

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { PresenceTracker } from '../src/camera/presence-tracker.js';
-import { InvalidOptionsError } from '../src/errors.js';
-import { FRAME_CONFIRMATION_WINDOW } from '../src/options.js';
+import { PresenceTracker } from '@/camera/presence-tracker.js';
+import { InvalidOptionsError } from '@/errors.js';
+import { FRAME_CONFIRMATION_WINDOW } from '@/options.js';
 
 function setup(timeoutMs = 1000, minSightings = 1) {
   let now = 0;

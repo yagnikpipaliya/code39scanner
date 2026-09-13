@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { FrameSource, StartOptions } from '../src/camera/frame-source.js';
-import { Code39Scanner, ScannerEvent, ScannerState } from '../src/camera/scanner.js';
+import { Code39Scanner, ScannerEvent, ScannerState } from '@/camera/scanner.js';
 import {
   CameraUnavailableError,
   ErrorCode,
@@ -11,11 +10,17 @@ import {
   PermissionDeniedError,
   UnsupportedBrowserError,
   type Code39ScannerError,
-} from '../src/errors.js';
-import { luminanceFromRgba, type LuminanceSource } from '../src/image/luminance.js';
-import { BarcodeFormat, type RgbaImage, type ScanResult } from '../src/types.js';
-import { deferred, type Deferred } from './helpers/deferred.js';
-import { composeImages, renderBarcode } from './helpers/encode.js';
+} from '@/errors.js';
+import { luminanceFromRgba } from '@/image/luminance.js';
+import {
+  BarcodeFormat,
+  type FrameSource,
+  type LuminanceSource,
+  type RgbaImage,
+  type ScanResult,
+  type StartOptions,
+} from '@/types.js';
+import { composeImages, deferred, renderBarcode, type Deferred } from '@tests/helpers.js';
 
 const BARCODE = renderBarcode('SCAN-1', { narrow: 2 });
 const OTHER = renderBarcode('SCAN-2', { narrow: 2 });

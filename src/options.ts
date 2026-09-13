@@ -1,6 +1,6 @@
-import { InvalidOptionsError } from './errors.js';
-import { ScanOrientation } from './types.js';
-import { isEnumValue } from './utils/enum.js';
+import { InvalidOptionsError } from '@/errors.js';
+import { ScanOrientation } from '@/types.js';
+import { isEnumValue } from '@/utils.js';
 
 /** Options for decoding a single scanline of bar/space widths. */
 export interface DecodeOptions {

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { CameraFrameSource } from '../src/camera/camera-frame-source.js';
+import { CameraFrameSource } from '@/camera/camera-frame-source.js';
 import {
   CameraUnavailableError,
   InsecureContextError,
@@ -7,11 +7,10 @@ import {
   OperationCancelledError,
   PermissionDeniedError,
   UnsupportedBrowserError,
-} from '../src/errors.js';
-import { Code39ImageDecoder } from '../src/image/image-decoder.js';
-import type { RgbaImage } from '../src/types.js';
-import { deferred } from './helpers/deferred.js';
-import { renderBarcode } from './helpers/encode.js';
+} from '@/errors.js';
+import { Code39ImageDecoder } from '@/image/image-decoder.js';
+import type { RgbaImage } from '@/types.js';
+import { deferred, renderBarcode } from '@tests/helpers.js';
 
 interface FakeTrack {
   readyState: 'live' | 'ended';

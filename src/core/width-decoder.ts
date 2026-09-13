@@ -1,16 +1,12 @@
-import {
-  resolveDecodeOptions,
-  type DecodeOptions,
-  type ResolvedDecodeOptions,
-} from '../options.js';
-import { BarcodeFormat, type DecodedBarcode } from '../types.js';
-import { expandFullAscii } from './full-ascii.js';
+import { resolveDecodeOptions, type DecodeOptions, type ResolvedDecodeOptions } from '@/options.js';
+import { BarcodeFormat, type DecodedBarcode } from '@/types.js';
 import {
   ELEMENTS_PER_CHARACTER,
+  expandFullAscii,
   PATTERN_TO_CHAR,
   START_STOP_CHARACTER,
   WIDE_ELEMENTS_PER_CHARACTER,
-} from './symbology.js';
+} from '@/core/symbology.js';
 
 /**
  * Run-length representation of one scanline.

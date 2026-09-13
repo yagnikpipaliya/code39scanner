@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { InvalidArgumentError } from '../src/errors.js';
-import { TypedEventEmitter } from '../src/events.js';
+import { InvalidArgumentError } from '@/errors.js';
+import { TypedEventEmitter } from '@/events.js';
 
 interface Events {
   ping: number;

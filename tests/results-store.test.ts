@@ -1,10 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import {
-  LEGACY_STORAGE_KEY,
-  MAX_RESULTS,
-  ResultsStore,
-  STORAGE_KEY,
-} from '../demo/results-store.js';
+import { LEGACY_STORAGE_KEY, MAX_RESULTS, ResultsStore, STORAGE_KEY } from '@demo/results-store.js';
 
 /** In-memory `localStorage` that can simulate a full quota. */
 class MemoryStorage {

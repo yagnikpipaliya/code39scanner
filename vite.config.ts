@@ -3,11 +3,19 @@ import { defineConfig } from 'vite';
 
 const fromRoot = (path: string) => fileURLToPath(new URL(path, import.meta.url));
 
+/** Absolute import prefixes. Mirrored in tsconfig.json `paths` for type-checking and editors. */
+export const aliases = {
+  '@demo': fromRoot('./demo'),
+  '@tests': fromRoot('./tests'),
+  '@': fromRoot('./src'),
+};
+
 export default defineConfig(({ command }) => ({
   root: fromRoot('./demo'),
   base: './',
   resolve: {
     alias: {
+      ...aliases,
       // The dev server uses the TypeScript sources for instant reloads; production builds consume
       // the compiled package output (`npm run build:lib`), exactly as an npm consumer would.
       'code39-scanner': fromRoot(command === 'serve' ? './src/index.ts' : './dist/index.js'),

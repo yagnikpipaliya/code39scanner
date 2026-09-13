@@ -10,7 +10,7 @@ import {
   OperationCancelledError,
   PermissionDeniedError,
   UnsupportedBrowserError,
-} from '../src/errors.js';
+} from '@/errors.js';
 
 const ERROR_CLASSES = [
   { ErrorClass: InvalidOptionsError, name: 'InvalidOptionsError', code: ErrorCode.InvalidOptions },

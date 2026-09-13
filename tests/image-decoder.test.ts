@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { InvalidArgumentError, InvalidOptionsError } from '../src/errors.js';
-import { Code39ImageDecoder, decodeImage } from '../src/image/image-decoder.js';
-import { luminanceFromRgba, toGrayscale } from '../src/image/luminance.js';
-import { binarizeLine } from '../src/image/scanline-binarizer.js';
-import { ScanOrientation, type RgbaImage } from '../src/types.js';
+import { InvalidArgumentError, InvalidOptionsError } from '@/errors.js';
+import { Code39ImageDecoder, decodeImage } from '@/image/image-decoder.js';
+import { luminanceFromRgba, toGrayscale } from '@/image/luminance.js';
+import { binarizeLine } from '@/image/scanline-binarizer.js';
+import { ScanOrientation, type RgbaImage } from '@/types.js';
 import {
   composeImages,
   renderBarcode,
@@ -12,7 +12,7 @@ import {
   rotate180,
   rotate90,
   toFullAscii,
-} from './helpers/encode.js';
+} from '@tests/helpers.js';
 
 const TEXT = 'CODE39-TEST';
 const HORIZONTAL_ONLY = { orientations: [ScanOrientation.Horizontal] } as const;

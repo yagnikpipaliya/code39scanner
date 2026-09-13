@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { InvalidOptionsError } from '../src/errors.js';
+import { InvalidOptionsError } from '@/errors.js';
 import {
   DEFAULT_SCANNER_OPTIONS,
   FRAME_CONFIRMATION_WINDOW,
   resolveScannerOptions,
   validateNumberOption,
-} from '../src/options.js';
-import { ScanOrientation } from '../src/types.js';
+} from '@/options.js';
+import { ScanOrientation } from '@/types.js';
 
 describe('resolveScannerOptions', () => {
   it('returns frozen defaults', () => {

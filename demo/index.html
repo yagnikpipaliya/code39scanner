@@ -19,17 +19,21 @@
     <script type="module" src="./main.js"></script>
   </head>
   <body>
+    <svg hidden>
+      <symbol id="icon-barcode" viewBox="0 0 24 24" fill="currentColor">
+        <rect x="4" y="5" width="1.6" height="14" rx="0.5" />
+        <rect x="7" y="5" width="1" height="14" rx="0.5" />
+        <rect x="9.4" y="5" width="2.2" height="14" rx="0.5" />
+        <rect x="13" y="5" width="1" height="14" rx="0.5" />
+        <rect x="15.4" y="5" width="1.6" height="14" rx="0.5" />
+        <rect x="18.4" y="5" width="1.6" height="14" rx="0.5" />
+      </symbol>
+    </svg>
+
     <main class="app">
       <header class="app__header">
         <span class="brand" aria-hidden="true">
-          <svg viewBox="0 0 24 24" fill="currentColor">
-            <rect x="4" y="5" width="1.6" height="14" rx="0.5" />
-            <rect x="7" y="5" width="1" height="14" rx="0.5" />
-            <rect x="9.4" y="5" width="2.2" height="14" rx="0.5" />
-            <rect x="13" y="5" width="1" height="14" rx="0.5" />
-            <rect x="15.4" y="5" width="1.6" height="14" rx="0.5" />
-            <rect x="18.4" y="5" width="1.6" height="14" rx="0.5" />
-          </svg>
+          <svg><use href="#icon-barcode" /></svg>
         </span>
         <div>
           <h1>Code 39 Scanner</h1>
@@ -85,14 +89,7 @@
         </div>
         <div id="results-empty" class="results__empty">
           <span class="results__empty-icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24" fill="currentColor">
-              <rect x="4" y="5" width="1.6" height="14" rx="0.5" />
-              <rect x="7" y="5" width="1" height="14" rx="0.5" />
-              <rect x="9.4" y="5" width="2.2" height="14" rx="0.5" />
-              <rect x="13" y="5" width="1" height="14" rx="0.5" />
-              <rect x="15.4" y="5" width="1.6" height="14" rx="0.5" />
-              <rect x="18.4" y="5" width="1.6" height="14" rx="0.5" />
-            </svg>
+            <svg><use href="#icon-barcode" /></svg>
           </span>
           <p class="results__empty-title">No barcodes scanned yet</p>
           <p class="results__empty-hint">Scans appear here and are saved on this device.</p>
@@ -108,14 +105,7 @@
     <template id="result-template">
       <li class="result">
         <span class="result__icon" aria-hidden="true">
-          <svg viewBox="0 0 24 24" fill="currentColor">
-            <rect x="4" y="5" width="1.6" height="14" rx="0.5" />
-            <rect x="7" y="5" width="1" height="14" rx="0.5" />
-            <rect x="9.4" y="5" width="2.2" height="14" rx="0.5" />
-            <rect x="13" y="5" width="1" height="14" rx="0.5" />
-            <rect x="15.4" y="5" width="1.6" height="14" rx="0.5" />
-            <rect x="18.4" y="5" width="1.6" height="14" rx="0.5" />
-          </svg>
+          <svg><use href="#icon-barcode" /></svg>
         </span>
         <div class="result__body">
           <code class="result__text"></code>

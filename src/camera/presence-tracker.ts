@@ -1,5 +1,5 @@
-import { monotonicClock, type Clock } from '../clock.js';
-import { FRAME_CONFIRMATION_WINDOW, validateNumberOption } from '../options.js';
+import { FRAME_CONFIRMATION_WINDOW, validateNumberOption } from '@/options.js';
+import { getOrInsert, monotonicClock, type Clock } from '@/utils.js';
 
 /**
  * Turns a stream of per-frame detections into discrete "appeared" events.
@@ -41,9 +41,8 @@ export class PresenceTracker {
 
     const appeared: string[] = [];
     for (const key of new Set(keys)) {
-      const frames = this.#sightings.get(key) ?? [];
+      const frames = getOrInsert(this.#sightings, key, () => []);
       frames.push(frame);
-      this.#sightings.set(key, frames);
       if (this.#present.has(key)) {
         this.#present.set(key, now);
       } else if (frames.length >= this.#minSightings) {

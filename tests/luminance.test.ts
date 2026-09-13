@@ -1,14 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { InvalidArgumentError } from '../src/errors.js';
-import { Code39ImageDecoder } from '../src/image/image-decoder.js';
-import {
-  luminanceFromGray,
-  luminanceFromRgba,
-  lumaLine,
-  toGrayscale,
-} from '../src/image/luminance.js';
-import type { GrayImage } from '../src/types.js';
-import { renderBarcode, renderNoise } from './helpers/encode.js';
+import { InvalidArgumentError } from '@/errors.js';
+import { Code39ImageDecoder } from '@/image/image-decoder.js';
+import { luminanceFromGray, luminanceFromRgba, lumaLine, toGrayscale } from '@/image/luminance.js';
+import type { GrayImage } from '@/types.js';
+import { renderBarcode, renderNoise } from '@tests/helpers.js';
 
 describe('luminance sources', () => {
   const rgba = renderNoise(37, 23, 3);

@@ -7,8 +7,8 @@ import {
   ELEMENTS_PER_CHARACTER,
   isWideElement,
   START_STOP_CHARACTER,
-} from '../../src/core/symbology.js';
-import type { RgbaImage } from '../../src/types.js';
+} from '@/core/symbology.js';
+import type { RgbaImage } from '@/types.js';
 
 export interface EncodeOptions {
   /** Narrow element width (any unit, e.g. pixels). Default 1. */
@@ -261,4 +261,21 @@ export function renderNoise(width: number, height: number, seed = 7): RgbaImage 
     data[p + 3] = 255;
   }
   return { width, height, data };
+}
+
+export interface Deferred<T> {
+  readonly promise: Promise<T>;
+  resolve(value: T): void;
+  reject(reason: unknown): void;
+}
+
+/** A promise settled from the outside — e.g. to hold an async call pending in a test. */
+export function deferred<T = void>(): Deferred<T> {
+  let resolve!: (value: T) => void;
+  let reject!: (reason: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
 }

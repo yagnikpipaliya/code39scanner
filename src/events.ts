@@ -1,4 +1,5 @@
-import { InvalidArgumentError } from './errors.js';
+import { InvalidArgumentError } from '@/errors.js';
+import { getOrInsert } from '@/utils.js';
 
 export type Listener<T> = (payload: T) => void;
 
@@ -14,12 +15,7 @@ export class TypedEventEmitter<Events extends object> {
     if (typeof listener !== 'function') {
       throw new InvalidArgumentError('Listener must be a function.');
     }
-    let listeners = this.#listeners.get(type);
-    if (!listeners) {
-      listeners = new Set();
-      this.#listeners.set(type, listeners);
-    }
-    listeners.add(listener);
+    getOrInsert(this.#listeners, type, () => new Set()).add(listener);
     return () => this.off(type, listener);
   }
 

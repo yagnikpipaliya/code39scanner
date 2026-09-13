@@ -6,10 +6,10 @@ import {
   PermissionDeniedError,
   UnsupportedBrowserError,
   type Code39ScannerError,
-} from '../errors.js';
-import { lumaLine, type LuminanceSource } from '../image/luminance.js';
-import { DEFAULT_SCANNER_OPTIONS, validateNumberOption } from '../options.js';
-import type { FrameSource, StartOptions } from './frame-source.js';
+} from '@/errors.js';
+import { lumaLine } from '@/image/luminance.js';
+import { DEFAULT_SCANNER_OPTIONS, validateNumberOption } from '@/options.js';
+import type { FrameSource, LuminanceSource, StartOptions } from '@/types.js';
 
 export interface CameraDevice {
   readonly deviceId: string;
@@ -85,9 +85,7 @@ function toCameraError(error: unknown): Code39ScannerError {
 }
 
 const cancelledStart = (cause?: unknown) =>
-  new OperationCancelledError('Camera start was superseded by a later start() or stop() call.', {
-    cause,
-  });
+  OperationCancelledError.superseded('Camera start', cause);
 
 const stopStream = (stream: MediaStream | null): void =>
   stream?.getTracks().forEach((track) => track.stop());

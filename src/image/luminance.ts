@@ -1,22 +1,5 @@
-import { InvalidArgumentError } from '../errors.js';
-import type { GrayImage, RgbaImage } from '../types.js';
-
-/**
- * Line-oriented access to image luminance. The decoder reads only the scanlines it samples,
- * so sources convert (or even fetch) just those lines instead of the whole frame.
- *
- * A source may be a view over a buffer that changes between frames (e.g. a camera canvas):
- * read its lines synchronously, before the next frame is captured.
- */
-export interface LuminanceSource {
-  readonly width: number;
-  readonly height: number;
-  row(y: number): Uint8Array;
-  column(x: number): Uint8Array;
-}
-
-/** Anything the decoder accepts: a luminance source, or an RGBA image such as `ImageData`. */
-export type ImageInput = LuminanceSource | RgbaImage;
+import { InvalidArgumentError } from '@/errors.js';
+import type { GrayImage, ImageInput, LuminanceSource, RgbaImage } from '@/types.js';
 
 /** Dimensions may be 0: an empty image (e.g. a camera still warming up) contains no barcode. */
 const isDimension = (value: unknown): value is number =>

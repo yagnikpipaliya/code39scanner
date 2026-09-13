@@ -1,6 +1,8 @@
 import { defineConfig } from 'vitest/config';
+import { aliases } from './vite.config.js';
 
 export default defineConfig({
+  resolve: { alias: aliases },
   test: {
     environment: 'node',
     include: ['tests/**/*.test.ts'],

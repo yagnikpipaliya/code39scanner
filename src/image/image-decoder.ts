@@ -1,14 +1,20 @@
-import { Code39WidthDecoder, type LineSymbol } from '../core/width-decoder.js';
+import { Code39WidthDecoder, type LineSymbol } from '@/core/width-decoder.js';
 import {
   resolveImageDecodeOptions,
   validateNumberOption,
   type ImageDecodeOptions,
   type ResolvedImageDecodeOptions,
   type ScanPassOptions,
-} from '../options.js';
-import { ScanOrientation, type DecodedBarcode } from '../types.js';
-import { toLuminanceSource, type ImageInput, type LuminanceSource } from './luminance.js';
-import { binarizeLine } from './scanline-binarizer.js';
+} from '@/options.js';
+import {
+  ScanOrientation,
+  type DecodedBarcode,
+  type ImageInput,
+  type LuminanceSource,
+} from '@/types.js';
+import { getOrInsert } from '@/utils.js';
+import { toLuminanceSource } from '@/image/luminance.js';
+import { binarizeLine } from '@/image/scanline-binarizer.js';
 
 /** Primary lines sit in the middle of their band unless a phase is given. */
 const DEFAULT_LINE_PHASE = 0.5;
@@ -77,12 +83,7 @@ class SupportGroup {
 
   /** Records a supporting line; returns the number of mutually independent supporting lines. */
   add(orientation: ScanOrientation, position: number): number {
-    let positions = this.#lines.get(orientation);
-    if (!positions) {
-      positions = new Set();
-      this.#lines.set(orientation, positions);
-    }
-    positions.add(position);
+    getOrInsert(this.#lines, orientation, () => new Set()).add(position);
 
     let independent = 0;
     for (const linePositions of this.#lines.values()) {
@@ -100,11 +101,7 @@ class ConfirmationLedger {
   readonly #groups = new Map<string, SupportGroup[]>();
 
   groupFor(rawText: string, moduleWidth: number): SupportGroup {
-    let groups = this.#groups.get(rawText);
-    if (!groups) {
-      groups = [];
-      this.#groups.set(rawText, groups);
-    }
+    const groups = getOrInsert(this.#groups, rawText, () => []);
     let group = groups.find((candidate) => candidate.matches(moduleWidth));
     if (!group) {
       group = new SupportGroup(moduleWidth);

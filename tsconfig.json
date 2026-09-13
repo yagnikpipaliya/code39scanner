@@ -19,7 +19,10 @@
     "allowJs": true,
     "checkJs": true,
     "paths": {
-      "code39-scanner": ["./src/index.ts"]
+      "code39-scanner": ["./src/index.ts"],
+      "@/*": ["./src/*"],
+      "@demo/*": ["./demo/*"],
+      "@tests/*": ["./tests/*"]
     },
     "skipLibCheck": true,
     "types": ["node"],

@@ -1,4 +1,3 @@
-import { monotonicClock } from '../clock.js';
 import {
   CameraUnavailableError,
   Code39ScannerError,
@@ -7,15 +6,14 @@ import {
   InvalidArgumentError,
   InvalidOptionsError,
   OperationCancelledError,
-} from '../errors.js';
-import { TypedEventEmitter, type Listener } from '../events.js';
-import { Code39ImageDecoder } from '../image/image-decoder.js';
-import { resolveScannerOptions, type ScannerOptions } from '../options.js';
-import type { ScanResult } from '../types.js';
-import { defineEnum, type EnumValue } from '../utils/enum.js';
-import { CameraFrameSource, type CameraDevice } from './camera-frame-source.js';
-import type { FrameSource, StartOptions } from './frame-source.js';
-import { PresenceTracker } from './presence-tracker.js';
+} from '@/errors.js';
+import { TypedEventEmitter, type Listener } from '@/events.js';
+import { Code39ImageDecoder } from '@/image/image-decoder.js';
+import { resolveScannerOptions, type ScannerOptions } from '@/options.js';
+import type { FrameSource, ScanResult, StartOptions } from '@/types.js';
+import { defineEnum, monotonicClock, type EnumValue } from '@/utils.js';
+import { CameraFrameSource, type CameraDevice } from '@/camera/camera-frame-source.js';
+import { PresenceTracker } from '@/camera/presence-tracker.js';
 
 export const ScannerState = defineEnum({
   Idle: 'idle',
@@ -79,7 +77,7 @@ const toScannerError = (error: unknown): Code39ScannerError =>
     : new FrameProcessingError('Failed to process a camera frame.', { cause: error });
 
 const cancelledStart = (cause?: unknown) =>
-  new OperationCancelledError('Scanner start was cancelled by stop() or dispose().', { cause });
+  OperationCancelledError.superseded('Scanner start', cause);
 
 const isDocumentHidden = (): boolean =>
   typeof document !== 'undefined' && document.visibilityState === 'hidden';

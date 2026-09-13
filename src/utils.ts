@@ -20,3 +20,22 @@ export function isEnumValue<T extends Readonly<Record<string, string>>>(
 ): value is EnumValue<T> {
   return typeof value === 'string' && Object.values(enumObject).includes(value);
 }
+
+/** Milliseconds from an arbitrary, fixed origin. */
+export type Clock = () => number;
+
+/**
+ * Monotonic clock for measuring durations. Unlike `Date.now()`, it never jumps when the system
+ * time changes (NTP sync, manual edits, DST), so elapsed times are always correct.
+ */
+export const monotonicClock: Clock = () => performance.now();
+
+/** The value stored under `key`; if there is none, `create()` is stored first and returned. */
+export function getOrInsert<K, V>(map: Map<K, V>, key: K, create: () => NoInfer<V>): V {
+  let value = map.get(key);
+  if (value === undefined) {
+    value = create();
+    map.set(key, value);
+  }
+  return value;
+}

@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { CODE39_ALPHABET } from '../src/core/symbology.js';
-import { Code39WidthDecoder, matchCharacter } from '../src/core/width-decoder.js';
-import { InvalidOptionsError } from '../src/errors.js';
-import { BarcodeFormat } from '../src/types.js';
-import { encodeRuns, joinRuns, toFullAscii } from './helpers/encode.js';
+import { CODE39_ALPHABET } from '@/core/symbology.js';
+import { Code39WidthDecoder, matchCharacter } from '@/core/width-decoder.js';
+import { InvalidOptionsError } from '@/errors.js';
+import { BarcodeFormat } from '@/types.js';
+import { encodeRuns, joinRuns, toFullAscii } from '@tests/helpers.js';
 
 const decoder = new Code39WidthDecoder();
 const DATA_CHARS = CODE39_ALPHABET.replace('*', '');
