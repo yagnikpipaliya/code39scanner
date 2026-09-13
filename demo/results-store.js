@@ -1,6 +1,10 @@
 /**
- * Scan history persisted in localStorage. Newest entries first, capped in size, and resilient
- * to unavailable storage (private mode, quota) and corrupted data.
+ * Scan history persisted in localStorage. Newest entries first and capped in size.
+ *
+ * - Every write re-reads storage first, so tabs never overwrite each other's scans.
+ * - Changes made in other tabs are picked up through the `storage` event.
+ * - Unavailable storage (private mode, blocked, quota) degrades to in-memory history, and
+ *   corrupted data is ignored.
  *
  * @typedef {{ readonly id: string, readonly text: string, readonly timestamp: number }} StoredResult
  * @typedef {(results: readonly StoredResult[]) => void} ResultsListener
@@ -8,6 +12,9 @@
 
 const STORAGE_KEY = 'code39-scanner:results:v1';
 export const MAX_RESULTS = 500;
+
+/** @type {readonly StoredResult[]} */
+const EMPTY = Object.freeze([]);
 
 /** @returns {Storage | null} */
 function getLocalStorage() {
@@ -19,14 +26,19 @@ function getLocalStorage() {
   }
 }
 
-/** @param {unknown} entry @returns {entry is StoredResult} */
-const isStoredResult = (entry) =>
-  typeof entry === 'object' &&
-  entry !== null &&
-  typeof entry.id === 'string' &&
-  typeof entry.text === 'string' &&
-  Number.isFinite(entry.timestamp);
+/** @param {unknown} value @returns {value is StoredResult} */
+function isStoredResult(value) {
+  if (typeof value !== 'object' || value === null) return false;
+  const entry = /** @type {Record<string, unknown>} */ (value);
+  return (
+    typeof entry.id === 'string' &&
+    typeof entry.text === 'string' &&
+    typeof entry.timestamp === 'number' &&
+    Number.isFinite(entry.timestamp)
+  );
+}
 
+/** @returns {string} */
 const createId = () =>
   globalThis.crypto?.randomUUID?.() ??
   `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
@@ -35,14 +47,23 @@ export class ResultsStore {
   /** @type {Storage | null} */
   #storage;
   /** @type {readonly StoredResult[]} */
-  #results;
+  #results = EMPTY;
   /** @type {Set<ResultsListener>} */
   #listeners = new Set();
+
+  /** @param {StorageEvent} event */
+  #onStorage = (event) => {
+    // `key` is null when another tab cleared all of storage.
+    if (event.key !== STORAGE_KEY && event.key !== null) return;
+    this.#results = this.#read();
+    this.#notify();
+  };
 
   /** @param {Storage | null} [storage] */
   constructor(storage = getLocalStorage()) {
     this.#storage = storage;
-    this.#results = this.#load();
+    this.#results = this.#read();
+    globalThis.addEventListener?.('storage', this.#onStorage);
   }
 
   /** @returns {readonly StoredResult[]} */
@@ -53,14 +74,12 @@ export class ResultsStore {
   /** @param {{ text: string, timestamp: number }} result @returns {StoredResult} */
   add({ text, timestamp }) {
     const entry = Object.freeze({ id: createId(), text, timestamp });
-    this.#results = Object.freeze([entry, ...this.#results].slice(0, MAX_RESULTS));
-    this.#commit();
+    this.#write([entry, ...this.#read()]);
     return entry;
   }
 
   clear() {
-    this.#results = Object.freeze([]);
-    this.#commit();
+    this.#write(EMPTY);
   }
 
   /** Calls `listener` now and after every change. @param {ResultsListener} listener */
@@ -70,27 +89,41 @@ export class ResultsStore {
     return () => this.#listeners.delete(listener);
   }
 
-  #commit() {
-    this.#save();
-    for (const listener of this.#listeners) listener(this.#results);
+  dispose() {
+    globalThis.removeEventListener?.('storage', this.#onStorage);
+    this.#listeners.clear();
   }
 
+  /** Latest persisted history; falls back to the in-memory copy when storage is unusable. */
   /** @returns {readonly StoredResult[]} */
-  #load() {
+  #read() {
+    if (!this.#storage) return this.#results;
     try {
-      const parsed = JSON.parse(this.#storage?.getItem(STORAGE_KEY) ?? '[]');
-      if (!Array.isArray(parsed)) return Object.freeze([]);
-      return Object.freeze(parsed.filter(isStoredResult).slice(0, MAX_RESULTS).map(Object.freeze));
+      const parsed = JSON.parse(this.#storage.getItem(STORAGE_KEY) ?? '[]');
+      if (!Array.isArray(parsed)) return EMPTY;
+      return Object.freeze(
+        parsed
+          .filter(isStoredResult)
+          .slice(0, MAX_RESULTS)
+          .map((entry) => Object.freeze(entry)),
+      );
     } catch {
-      return Object.freeze([]);
+      return this.#results;
     }
   }
 
-  #save() {
+  /** @param {readonly StoredResult[]} results */
+  #write(results) {
+    this.#results = Object.freeze(results.slice(0, MAX_RESULTS));
     try {
       this.#storage?.setItem(STORAGE_KEY, JSON.stringify(this.#results));
     } catch (error) {
       console.warn('Scan history could not be saved.', error);
     }
+    this.#notify();
+  }
+
+  #notify() {
+    for (const listener of this.#listeners) listener(this.#results);
   }
 }

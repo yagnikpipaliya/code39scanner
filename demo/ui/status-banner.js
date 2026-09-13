@@ -1,3 +1,8 @@
+/** Visual tone of a status message. */
+export const StatusTone = Object.freeze(/** @type {const} */ ({ Info: 'info', Error: 'error' }));
+
+/** @typedef {typeof StatusTone[keyof typeof StatusTone]} StatusToneValue */
+
 /** Inline status/error message area. */
 export class StatusBanner {
   /** @type {HTMLElement} */
@@ -8,10 +13,10 @@ export class StatusBanner {
     this.#element = element;
   }
 
-  /** @param {string} message @param {'info' | 'error'} [tone] */
-  show(message, tone = 'info') {
+  /** @param {string} message @param {StatusToneValue} [tone] */
+  show(message, tone = StatusTone.Info) {
     this.#element.textContent = message;
-    this.#element.classList.toggle('status--error', tone === 'error');
+    this.#element.classList.toggle('status--error', tone === StatusTone.Error);
     this.#element.hidden = false;
   }
 
