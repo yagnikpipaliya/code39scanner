@@ -27,9 +27,10 @@
   ],
   "sideEffects": false,
   "engines": {
-    "node": ">=18"
+    "node": "^20.19.0 || >=22.12.0"
   },
   "scripts": {
+    "prepare": "npm run build:lib",
     "clean": "node -e \"for (const d of ['dist','dist-demo','coverage']) require('fs').rmSync(d,{recursive:true,force:true})\"",
     "build": "npm run clean && npm run build:lib && npm run build:demo",
     "build:lib": "tsc -p tsconfig.build.json",
@@ -46,6 +47,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@types/node": "^22.20.2",
     "@vitest/coverage-v8": "^5.0.0",
     "eslint": "^10.10.0",
     "globals": "^17.12.0",
