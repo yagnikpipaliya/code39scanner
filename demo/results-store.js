@@ -61,10 +61,28 @@ export class ResultsStore {
     if (event.key !== STORAGE_KEY && event.key !== null) return;
     const stored = this.#readStorage();
     if (!stored) return;
-    this.#results = stored;
-    this.#inSync = true;
-    this.#notify();
+    if (this.#inSync) {
+      this.#results = stored;
+      this.#notify();
+    } else {
+      // This tab holds scans that were never saved: merge instead of replacing, and retry saving.
+      this.#write(ResultsStore.#merge(this.#results, stored));
+    }
   };
+
+  /**
+   * Union of two histories by id, newest first.
+   *
+   * @param {readonly StoredResult[]} ours
+   * @param {readonly StoredResult[]} theirs
+   * @returns {StoredResult[]}
+   */
+  static #merge(ours, theirs) {
+    /** @type {Map<string, StoredResult>} */
+    const byId = new Map();
+    for (const entry of [...theirs, ...ours]) byId.set(entry.id, entry);
+    return [...byId.values()].sort((a, b) => b.timestamp - a.timestamp);
+  }
 
   /** @param {Storage | null} [storage] */
   constructor(storage = getLocalStorage()) {
