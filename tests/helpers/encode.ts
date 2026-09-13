@@ -176,6 +176,38 @@ export function rotate90(image: RgbaImage): RgbaImage {
   return { width: height, height: width, data: out };
 }
 
+export interface Placement {
+  readonly image: RgbaImage;
+  readonly x: number;
+  readonly y: number;
+}
+
+/** Composes images onto a light canvas (e.g. several barcodes in one frame). */
+export function composeImages(
+  width: number,
+  height: number,
+  placements: readonly Placement[],
+  background = 230,
+): RgbaImage {
+  const data = new Uint8ClampedArray(width * height * 4).fill(background);
+  for (const { image, x, y } of placements) {
+    for (let row = 0; row < image.height; row++) {
+      const src = image.data.subarray(row * image.width * 4, (row + 1) * image.width * 4);
+      data.set(src, ((y + row) * width + x) * 4);
+    }
+  }
+  return { width, height, data };
+}
+
+/** Joins run-length symbols on one scanline, merging adjacent quiet zones. */
+export function joinRuns(...symbols: readonly number[][]): number[] {
+  return symbols.reduce((joined, runs) =>
+    joined.length === 0
+      ? [...runs]
+      : [...joined.slice(0, -1), joined.at(-1)! + runs[0]!, ...runs.slice(1)],
+  );
+}
+
 /** Solid or random-noise image with no barcode. */
 export function renderNoise(width: number, height: number, seed = 7): RgbaImage {
   const random = seededRandom(seed);

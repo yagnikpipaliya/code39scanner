@@ -1,3 +1,5 @@
+import { defineEnum, type EnumValue } from './utils/enum.js';
+
 /** RGBA pixel buffer (4 bytes per pixel). Structurally compatible with the DOM `ImageData`. */
 export interface RgbaImage {
   readonly width: number;
@@ -12,17 +14,28 @@ export interface GrayImage {
   readonly data: Uint8Array;
 }
 
-export type ScanOrientation = 'horizontal' | 'vertical';
+/** Direction of the sampled scanlines. */
+export const ScanOrientation = defineEnum({
+  Horizontal: 'horizontal',
+  Vertical: 'vertical',
+});
+export type ScanOrientation = EnumValue<typeof ScanOrientation>;
 
-export const BARCODE_FORMAT = 'CODE_39';
+export const BarcodeFormat = defineEnum({
+  Code39: 'CODE_39',
+});
+export type BarcodeFormat = EnumValue<typeof BarcodeFormat>;
 
 /** A successfully decoded barcode. */
 export interface DecodedBarcode {
-  /** Decoded payload (Full ASCII expanded when enabled). */
+  /**
+   * Decoded payload. With `fullAscii` enabled, shift sequences are expanded; a payload that is
+   * not valid Full ASCII is returned unchanged (it is then plain Code 39).
+   */
   readonly text: string;
   /** Payload exactly as encoded in the symbol, without start/stop characters. */
   readonly rawText: string;
-  readonly format: typeof BARCODE_FORMAT;
+  readonly format: BarcodeFormat;
 }
 
 /** A barcode detected by the live scanner. */

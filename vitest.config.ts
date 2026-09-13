@@ -7,12 +7,12 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       include: ['src/**/*.ts'],
-      // Browser-only adapter (getUserMedia / canvas) is exercised via the demo, not in Node.
-      exclude: ['src/index.ts', 'src/camera/camera-frame-source.ts'],
+      exclude: ['src/index.ts'],
       reporter: ['text', 'html'],
       thresholds: {
         'src/core/**': { statements: 90, branches: 90, functions: 90, lines: 90 },
         'src/image/**': { statements: 90, branches: 85, functions: 90, lines: 90 },
+        'src/camera/**': { statements: 85, branches: 80, functions: 85, lines: 85 },
       },
     },
   },

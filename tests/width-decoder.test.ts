@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { CODE39_ALPHABET } from '../src/core/symbology.js';
 import { Code39WidthDecoder, matchCharacter } from '../src/core/width-decoder.js';
 import { InvalidOptionsError } from '../src/errors.js';
-import { encodeRuns, toFullAscii } from './helpers/encode.js';
+import { BarcodeFormat } from '../src/types.js';
+import { encodeRuns, joinRuns, toFullAscii } from './helpers/encode.js';
 
 const decoder = new Code39WidthDecoder();
 const DATA_CHARS = CODE39_ALPHABET.replace('*', '');
@@ -10,7 +11,7 @@ const DATA_CHARS = CODE39_ALPHABET.replace('*', '');
 describe('Code39WidthDecoder', () => {
   it('decodes every data character', () => {
     const result = decoder.decode(encodeRuns(DATA_CHARS));
-    expect(result).toEqual({ text: DATA_CHARS, rawText: DATA_CHARS, format: 'CODE_39' });
+    expect(result).toEqual({ text: DATA_CHARS, rawText: DATA_CHARS, format: BarcodeFormat.Code39 });
   });
 
   it.each([2, 2.5, 3])('decodes with wide:narrow ratio %s', (ratio) => {
@@ -80,12 +81,13 @@ describe('Code39WidthDecoder', () => {
     expect(full).toEqual({
       text: 'Hello, World!',
       rawText: 'H+E+L+L+O/L W+O+R+L+D/A',
-      format: 'CODE_39',
+      format: BarcodeFormat.Code39,
     });
   });
 
-  it('rejects invalid Full ASCII sequences when enabled', () => {
-    expect(new Code39WidthDecoder({ fullAscii: true }).decode(encodeRuns('A+1'))).toBeNull();
+  it('returns plain Code 39 when a Full ASCII payload is invalid (e.g. "12/34-A")', () => {
+    const result = new Code39WidthDecoder({ fullAscii: true }).decode(encodeRuns('12/34-A'));
+    expect(result).toEqual({ text: '12/34-A', rawText: '12/34-A', format: BarcodeFormat.Code39 });
   });
 
   it('returns null for empty or garbage input', () => {
@@ -99,6 +101,28 @@ describe('Code39WidthDecoder', () => {
     expect(() => new Code39WidthDecoder({ fullAscii: 'yes' as unknown as boolean })).toThrow(
       InvalidOptionsError,
     );
+  });
+});
+
+describe('Code39WidthDecoder.decodeAll', () => {
+  const texts = (runs: number[]) => decoder.decodeAll(runs).map((result) => result.text);
+
+  it('finds every symbol on one scanline, while decode() returns the first', () => {
+    const runs = joinRuns(encodeRuns('LEFT'), encodeRuns('RIGHT'));
+    expect(texts(runs)).toEqual(['LEFT', 'RIGHT']);
+    expect(decoder.decode(runs)?.text).toBe('LEFT');
+  });
+
+  it('finds symbols printed in opposite directions', () => {
+    expect(texts(joinRuns(encodeRuns('UP'), encodeRuns('DOWN').reverse()))).toEqual(['UP', 'DOWN']);
+  });
+
+  it('reports a repeated symbol once', () => {
+    expect(texts(joinRuns(encodeRuns('SAME'), encodeRuns('SAME')))).toEqual(['SAME']);
+  });
+
+  it('returns an empty list when nothing decodes', () => {
+    expect(decoder.decodeAll([10, 1, 10])).toEqual([]);
   });
 });
 

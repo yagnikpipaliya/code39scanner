@@ -1,20 +1,34 @@
+import { monotonicClock } from '../clock.js';
 import { CameraUnavailableError, InvalidOptionsError } from '../errors.js';
 import { TypedEventEmitter, type Listener } from '../events.js';
 import { Code39ImageDecoder } from '../image/image-decoder.js';
 import { resolveScannerOptions, type ScannerOptions } from '../options.js';
 import type { ScanResult } from '../types.js';
+import { defineEnum, type EnumValue } from '../utils/enum.js';
 import { CameraFrameSource, type CameraDevice } from './camera-frame-source.js';
 import type { FrameSource, StartOptions } from './frame-source.js';
 import { PresenceTracker } from './presence-tracker.js';
 
-export type ScannerState = 'idle' | 'starting' | 'scanning';
+export const ScannerState = defineEnum({
+  Idle: 'idle',
+  Starting: 'starting',
+  Scanning: 'scanning',
+});
+export type ScannerState = EnumValue<typeof ScannerState>;
+
+export const ScannerEvent = defineEnum({
+  /** A barcode came into view. */
+  Detect: 'detect',
+  /** A runtime failure while scanning (e.g. the camera was disconnected). */
+  Error: 'error',
+  StateChange: 'statechange',
+});
+export type ScannerEvent = EnumValue<typeof ScannerEvent>;
 
 export interface ScannerEventMap {
-  /** A barcode came into view. */
-  detect: ScanResult;
-  /** A runtime failure while scanning (e.g. the camera was disconnected). */
-  error: Error;
-  statechange: ScannerState;
+  [ScannerEvent.Detect]: ScanResult;
+  [ScannerEvent.Error]: Error;
+  [ScannerEvent.StateChange]: ScannerState;
 }
 
 export interface Code39ScannerOptions extends ScannerOptions {
@@ -23,6 +37,13 @@ export interface Code39ScannerOptions extends ScannerOptions {
   /** Custom frame provider; replaces the built-in camera source. */
   readonly frameSource?: FrameSource;
 }
+
+/**
+ * Step between the scanline phases of successive frames. The golden-ratio sequence never
+ * repeats and spreads evenly, so the sampled lines sweep the whole frame within a few frames.
+ */
+const LINE_PHASE_STEP = (Math.sqrt(5) - 1) / 2;
+const INITIAL_LINE_PHASE = 0.5;
 
 const toError = (value: unknown): Error =>
   value instanceof Error ? value : new Error(String(value));
@@ -51,9 +72,10 @@ export class Code39Scanner {
   readonly #decoder: Code39ImageDecoder;
   readonly #tracker: PresenceTracker;
   readonly #scanIntervalMs: number;
-  #state: ScannerState = 'idle';
+  #state: ScannerState = ScannerState.Idle;
   #timer: ReturnType<typeof setTimeout> | undefined;
   #queue: Promise<unknown> = Promise.resolve();
+  #linePhase = INITIAL_LINE_PHASE;
 
   constructor(options: Code39ScannerOptions) {
     const { video, frameSource, ...scannerOptions } = options ?? {};
@@ -94,17 +116,20 @@ export class Code39Scanner {
     return this.#serialize(async () => {
       const sameDevice =
         options.deviceId === undefined || options.deviceId === this.#source.activeDeviceId;
-      if (this.#state === 'scanning' && sameDevice) return;
+      if (this.#state === ScannerState.Scanning && sameDevice) return;
 
-      this.#halt();
-      this.#setState('starting');
+      // A restart (e.g. switching cameras) goes straight to "starting", never through "idle".
+      this.#cancelTick();
+      this.#source.stop();
+      this.#setState(ScannerState.Starting);
       try {
         await this.#source.start(options);
       } catch (error) {
         this.#halt();
         throw error;
       }
-      this.#setState('scanning');
+      this.#tracker.reset();
+      this.#setState(ScannerState.Scanning);
       this.#scheduleTick(0);
     });
   }
@@ -133,26 +158,30 @@ export class Code39Scanner {
   }
 
   #halt(): void {
-    clearTimeout(this.#timer);
-    this.#timer = undefined;
+    this.#cancelTick();
     this.#source.stop();
     this.#tracker.reset();
-    this.#setState('idle');
+    this.#setState(ScannerState.Idle);
   }
 
   #setState(state: ScannerState): void {
     if (this.#state === state) return;
     this.#state = state;
-    this.#events.emit('statechange', state);
+    this.#events.emit(ScannerEvent.StateChange, state);
   }
 
   #scheduleTick(delayMs: number): void {
     this.#timer = setTimeout(() => this.#tick(), delayMs);
   }
 
+  #cancelTick(): void {
+    clearTimeout(this.#timer);
+    this.#timer = undefined;
+  }
+
   #tick(): void {
     this.#timer = undefined;
-    if (this.#state !== 'scanning') return;
+    if (this.#state !== ScannerState.Scanning) return;
 
     if (!this.#source.isActive) {
       this.#halt();
@@ -160,15 +189,15 @@ export class Code39Scanner {
       return;
     }
 
-    const startedAt = Date.now();
+    const startedAt = monotonicClock();
     try {
       this.#scanFrame();
     } catch (error) {
       this.#reportError(toError(error));
     }
     // A listener may have stopped the scanner during this tick.
-    if (this.#state === 'scanning' && this.#timer === undefined) {
-      this.#scheduleTick(Math.max(0, this.#scanIntervalMs - (Date.now() - startedAt)));
+    if (this.#state === ScannerState.Scanning && this.#timer === undefined) {
+      this.#scheduleTick(Math.max(0, this.#scanIntervalMs - (monotonicClock() - startedAt)));
     }
   }
 
@@ -177,16 +206,20 @@ export class Code39Scanner {
     const frame = this.#source.grabFrame();
     if (!frame) return;
 
-    const results = this.#decoder.decodeAll(frame);
+    const linePhase = this.#linePhase;
+    this.#linePhase = (linePhase + LINE_PHASE_STEP) % 1;
+    const results = this.#decoder.decodeAll(frame, { linePhase });
     const appeared = new Set(this.#tracker.observe(results.map((result) => result.rawText)));
     const timestamp = Date.now();
     for (const result of results) {
-      if (appeared.has(result.rawText)) this.#events.emit('detect', { ...result, timestamp });
+      if (appeared.has(result.rawText)) {
+        this.#events.emit(ScannerEvent.Detect, { ...result, timestamp });
+      }
     }
   }
 
   #reportError(error: Error): void {
-    if (this.#events.emit('error', error)) return;
+    if (this.#events.emit(ScannerEvent.Error, error)) return;
     // Never swallow errors silently when nobody listens.
     if (typeof reportError === 'function') reportError(error);
     else console.error(error);

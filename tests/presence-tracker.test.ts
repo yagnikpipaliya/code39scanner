@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { PresenceTracker } from '../src/camera/presence-tracker.js';
+import { InvalidOptionsError } from '../src/errors.js';
 
 function setup(timeoutMs = 1000) {
   let now = 0;
@@ -49,7 +50,11 @@ describe('PresenceTracker', () => {
     expect(tracker.observe(['A'])).toEqual(['A']);
   });
 
-  it('uses Date.now by default', () => {
+  it('uses a monotonic clock by default', () => {
     expect(new PresenceTracker(1000).observe(['A'])).toEqual(['A']);
+  });
+
+  it.each([Number.NaN, -1, Infinity])('rejects an invalid timeout (%s)', (timeoutMs) => {
+    expect(() => new PresenceTracker(timeoutMs)).toThrow(InvalidOptionsError);
   });
 });

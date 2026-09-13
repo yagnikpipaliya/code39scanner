@@ -1,12 +1,20 @@
 import { describe, expect, it } from 'vitest';
 import { InvalidOptionsError } from '../src/errors.js';
 import { Code39ImageDecoder, decodeImage } from '../src/image/image-decoder.js';
-import { toGrayscale } from '../src/image/luminance.js';
+import { luminanceFromRgba, toGrayscale } from '../src/image/luminance.js';
 import { binarizeLine } from '../src/image/scanline-binarizer.js';
-import type { RgbaImage } from '../src/types.js';
-import { renderBarcode, renderNoise, rotate180, rotate90, toFullAscii } from './helpers/encode.js';
+import { ScanOrientation, type RgbaImage } from '../src/types.js';
+import {
+  composeImages,
+  renderBarcode,
+  renderNoise,
+  rotate180,
+  rotate90,
+  toFullAscii,
+} from './helpers/encode.js';
 
 const TEXT = 'CODE39-TEST';
+const HORIZONTAL_ONLY = { orientations: [ScanOrientation.Horizontal] } as const;
 
 describe('decodeImage', () => {
   // ~1.5 px per narrow element is the documented minimum: below it, a narrow space between two
@@ -48,7 +56,7 @@ describe('decodeImage', () => {
   it('decodes vertical barcodes (90°)', () => {
     const image = rotate90(renderBarcode(TEXT, { narrow: 2 }));
     expect(decodeImage(image)?.text).toBe(TEXT);
-    expect(decodeImage(image, { orientations: ['horizontal'] })).toBeNull();
+    expect(decodeImage(image, HORIZONTAL_ONLY)).toBeNull();
   });
 
   it('decodes Full ASCII when enabled', () => {
@@ -66,14 +74,6 @@ describe('decodeImage', () => {
     expect(decodeImage(renderNoise(400, 300))).toBeNull();
   });
 
-  it('requires minConfirmations agreeing scanlines', () => {
-    // A 2px-tall barcode is crossed by exactly two of 100 horizontal scanlines.
-    const thin = renderBarcode(TEXT, { narrow: 2, height: 100, barHeight: 0.03 });
-    const options = { orientations: ['horizontal'], scanLines: 100 } as const;
-    expect(decodeImage(thin, { ...options, minConfirmations: 3 })).toBeNull();
-    expect(decodeImage(thin, { ...options, minConfirmations: 2 })?.text).toBe(TEXT);
-  });
-
   it('validates image input', () => {
     expect(() => decodeImage({ width: 10, height: 10, data: new Uint8ClampedArray(10) })).toThrow(
       TypeError,
@@ -84,7 +84,7 @@ describe('decodeImage', () => {
   it('validates options', () => {
     expect(() => new Code39ImageDecoder({ scanLines: 0 })).toThrow(InvalidOptionsError);
     expect(() => new Code39ImageDecoder({ orientations: [] })).toThrow(InvalidOptionsError);
-    expect(() => new Code39ImageDecoder({ orientations: ['diagonal' as 'horizontal'] })).toThrow(
+    expect(() => new Code39ImageDecoder({ orientations: ['diagonal' as ScanOrientation] })).toThrow(
       InvalidOptionsError,
     );
     expect(() => new Code39ImageDecoder({ scanLines: 2, minConfirmations: 5 })).toThrow(
@@ -93,25 +93,63 @@ describe('decodeImage', () => {
   });
 });
 
-describe('Code39ImageDecoder.decodeAll', () => {
-  it('finds two different barcodes in one image', () => {
+describe('Code39ImageDecoder', () => {
+  it('requires minConfirmations distinct agreeing scanlines', () => {
+    // A 2px-tall barcode (rows 49–50 of 100). With phase 0.8 the primary line at row 49 hits it
+    // and the neighbour probe at row 50 confirms it; no third line can.
+    const source = luminanceFromRgba(
+      renderBarcode(TEXT, { narrow: 2, height: 100, barHeight: 0.03 }),
+    );
+    const decoder = (minConfirmations: number) =>
+      new Code39ImageDecoder({ ...HORIZONTAL_ONLY, minConfirmations });
+    expect(decoder(2).decode(source, { linePhase: 0.8 })?.text).toBe(TEXT);
+    expect(decoder(3).decode(source, { linePhase: 0.8 })).toBeNull();
+  });
+
+  it('confirms barcodes thinner than the scanline spacing once a line crosses them', () => {
+    // 1080 rows / 24 lines = 45px spacing; the barcode covers rows 530–549 only.
+    const source = luminanceFromRgba(
+      renderBarcode(TEXT, { narrow: 2, height: 1080, barHeight: 20 / 1080 }),
+    );
+    const decoder = new Code39ImageDecoder(HORIZONTAL_ONLY);
+    expect(decoder.decode(source, { linePhase: 0.5 })).toBeNull(); // lines at rows 517 and 562
+    expect(decoder.decode(source, { linePhase: 0.9 })?.text).toBe(TEXT); // line at row 535
+  });
+
+  it('finds two barcodes stacked vertically', () => {
     const top = renderBarcode('TOP', { narrow: 2, height: 60, barHeight: 0.9 });
     const bottom = renderBarcode('BOTTOM', { narrow: 2, height: 60, barHeight: 0.9 });
-    const width = Math.max(top.width, bottom.width);
-    const data = new Uint8ClampedArray(width * 120 * 4).fill(230);
-    const blit = (img: RgbaImage, offsetY: number) => {
-      for (let y = 0; y < img.height; y++) {
-        const src = img.data.subarray(y * img.width * 4, (y + 1) * img.width * 4);
-        data.set(src, (y + offsetY) * width * 4);
-      }
-    };
-    blit(top, 0);
-    blit(bottom, 60);
-    const texts = new Code39ImageDecoder({ orientations: ['horizontal'] })
-      .decodeAll({ width, height: 120, data })
+    const image = composeImages(Math.max(top.width, bottom.width), 120, [
+      { image: top, x: 0, y: 0 },
+      { image: bottom, x: 0, y: 60 },
+    ]);
+    const texts = new Code39ImageDecoder(HORIZONTAL_ONLY)
+      .decodeAll(luminanceFromRgba(image))
       .map((r) => r.text)
       .sort();
     expect(texts).toEqual(['BOTTOM', 'TOP']);
+  });
+
+  it('finds two barcodes side by side on the same scanlines', () => {
+    const left = renderBarcode('LEFT', { narrow: 2 });
+    const right = renderBarcode('RIGHT', { narrow: 2 });
+    const image = composeImages(left.width + right.width, left.height, [
+      { image: left, x: 0, y: 0 },
+      { image: right, x: left.width, y: 0 },
+    ]);
+    const texts = new Code39ImageDecoder(HORIZONTAL_ONLY)
+      .decodeAll(luminanceFromRgba(image))
+      .map((r) => r.text);
+    expect(texts).toEqual(['LEFT', 'RIGHT']);
+  });
+
+  it('validates the line phase', () => {
+    const source = luminanceFromRgba(renderBarcode(TEXT, { narrow: 2 }));
+    for (const linePhase of [-0.1, 1.5, Number.NaN]) {
+      expect(() => new Code39ImageDecoder().decode(source, { linePhase })).toThrow(
+        InvalidOptionsError,
+      );
+    }
   });
 });
 

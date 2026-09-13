@@ -1,3 +1,6 @@
+import { monotonicClock, type Clock } from '../clock.js';
+import { validateNumberOption } from '../options.js';
+
 /**
  * Turns a stream of per-frame detections into discrete "appeared" events.
  *
@@ -6,17 +9,18 @@
  */
 export class PresenceTracker {
   readonly #timeoutMs: number;
-  readonly #now: () => number;
+  readonly #clock: Clock;
   readonly #lastSeen = new Map<string, number>();
 
-  constructor(timeoutMs: number, now: () => number = () => Date.now()) {
-    this.#timeoutMs = timeoutMs;
-    this.#now = now;
+  /** @param clock Defaults to a monotonic clock, so system time changes cannot skew timeouts. */
+  constructor(timeoutMs: number, clock: Clock = monotonicClock) {
+    this.#timeoutMs = validateNumberOption('presenceTimeoutMs', timeoutMs);
+    this.#clock = clock;
   }
 
   /** Records the keys seen in one frame and returns those that just appeared. */
   observe(keys: Iterable<string>): string[] {
-    const now = this.#now();
+    const now = this.#clock();
     for (const [key, seenAt] of this.#lastSeen) {
       if (now - seenAt > this.#timeoutMs) this.#lastSeen.delete(key);
     }

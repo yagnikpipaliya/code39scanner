@@ -1,8 +1,11 @@
 import type { GrayImage, RgbaImage } from '../types.js';
 
 /**
- * Line-oriented access to image luminance. The decoder only samples a few dozen scanlines, so
- * converting just those lines (instead of the whole frame) keeps full camera resolution cheap.
+ * Line-oriented access to image luminance. The decoder reads only the scanlines it samples,
+ * so sources convert (or even fetch) just those lines instead of the whole frame.
+ *
+ * A source may be a view over a buffer that changes between frames (e.g. a camera canvas):
+ * read its lines synchronously, before the next frame is captured.
  */
 export interface LuminanceSource {
   readonly width: number;
@@ -28,31 +31,38 @@ export function assertImage(image: RgbaImage | GrayImage, bytesPerPixel: 1 | 4):
   }
 }
 
-/** Integer Rec. 601 luma of the RGBA pixel starting at byte offset `p`. */
-const luma = (data: RgbaImage['data'], p: number): number =>
-  (data[p]! * 77 + data[p + 1]! * 150 + data[p + 2]! * 29) >> 8;
+/**
+ * Converts `count` RGBA pixels to luminance (integer Rec. 601 weights). Pixels start at byte
+ * `offset` and are `stride` bytes apart (4 for a row, `width * 4` for a column).
+ */
+export function lumaLine(
+  data: ArrayLike<number>,
+  count: number,
+  offset = 0,
+  stride = 4,
+): Uint8Array {
+  const line = new Uint8Array(count);
+  for (let i = 0, p = offset; i < count; i++, p += stride) {
+    line[i] = (data[p]! * 77 + data[p + 1]! * 150 + data[p + 2]! * 29) >> 8;
+  }
+  return line;
+}
 
-export function rgbaLuminance(image: RgbaImage): LuminanceSource {
+/** Luminance source over an RGBA image (e.g. `ImageData`). */
+export function luminanceFromRgba(image: RgbaImage): LuminanceSource {
   assertImage(image, 4);
   const { width, height, data } = image;
   const stride = width * 4;
   return {
     width,
     height,
-    row(y) {
-      const line = new Uint8Array(width);
-      for (let x = 0, p = y * stride; x < width; x++, p += 4) line[x] = luma(data, p);
-      return line;
-    },
-    column(x) {
-      const line = new Uint8Array(height);
-      for (let y = 0, p = x * 4; y < height; y++, p += stride) line[y] = luma(data, p);
-      return line;
-    },
+    row: (y) => lumaLine(data, width, y * stride),
+    column: (x) => lumaLine(data, height, x * 4, stride),
   };
 }
 
-export function grayLuminance(image: GrayImage): LuminanceSource {
+/** Luminance source over a single-channel image. */
+export function luminanceFromGray(image: GrayImage): LuminanceSource {
   assertImage(image, 1);
   const { width, height, data } = image;
   return {
@@ -71,7 +81,5 @@ export function grayLuminance(image: GrayImage): LuminanceSource {
 export function toGrayscale(image: RgbaImage): GrayImage {
   assertImage(image, 4);
   const { width, height, data } = image;
-  const gray = new Uint8Array(width * height);
-  for (let i = 0; i < gray.length; i++) gray[i] = luma(data, i * 4);
-  return { width, height, data: gray };
+  return { width, height, data: lumaLine(data, width * height) };
 }

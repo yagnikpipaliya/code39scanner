@@ -3,7 +3,7 @@ import {
   type DecodeOptions,
   type ResolvedDecodeOptions,
 } from '../options.js';
-import { BARCODE_FORMAT, type DecodedBarcode } from '../types.js';
+import { BarcodeFormat, type DecodedBarcode } from '../types.js';
 import { expandFullAscii } from './full-ascii.js';
 import {
   ELEMENTS_PER_CHARACTER,
@@ -42,6 +42,12 @@ interface CharacterMatch {
   readonly width: number;
   /** Mean narrow-element width — the local module size. */
   readonly narrow: number;
+}
+
+interface SymbolMatch {
+  readonly result: DecodedBarcode;
+  /** Index of the symbol's trailing quiet zone (which may lead into the next symbol). */
+  readonly end: number;
 }
 
 /**
@@ -91,8 +97,14 @@ export function matchCharacter(runs: Runs, offset: number): CharacterMatch | nul
 const isWidthConsistent = (current: CharacterMatch, previous: CharacterMatch): boolean =>
   Math.abs(current.width - previous.width) <= previous.width * MAX_CHARACTER_WIDTH_CHANGE;
 
+/** The runs as read left-to-right, then reversed (restores the order of an upside-down symbol). */
+function* readingDirections(runs: Runs): Generator<Runs> {
+  yield runs;
+  yield Array.from(runs).reverse();
+}
+
 /**
- * Decodes a Code 39 symbol from the run-lengths of one scanline, in either reading direction.
+ * Decodes Code 39 symbols from the run-lengths of one scanline, in both reading directions.
  */
 export class Code39WidthDecoder {
   readonly #options: ResolvedDecodeOptions;
@@ -101,21 +113,33 @@ export class Code39WidthDecoder {
     this.#options = resolveDecodeOptions(options);
   }
 
+  /** The first symbol on the scanline, or `null`. */
   decode(runs: Runs): DecodedBarcode | null {
-    // Reversing the runs of an upside-down symbol restores its natural element order.
-    return this.#decodeForward(runs) ?? this.#decodeForward(Array.from(runs).reverse());
+    return this.#collect(runs, true)[0] ?? null;
   }
 
-  #decodeForward(runs: Runs): DecodedBarcode | null {
-    for (let start = 1; start + ELEMENTS_PER_CHARACTER < runs.length; start += 2) {
-      const result = this.#decodeAt(runs, start);
-      if (result) return result;
+  /** Every distinct symbol on the scanline (e.g. two labels side by side). */
+  decodeAll(runs: Runs): DecodedBarcode[] {
+    return this.#collect(runs, false);
+  }
+
+  #collect(runs: Runs, stopAtFirst: boolean): DecodedBarcode[] {
+    const found = new Map<string, DecodedBarcode>();
+    for (const directed of readingDirections(runs)) {
+      for (let start = 1; start + ELEMENTS_PER_CHARACTER < directed.length; start += 2) {
+        const match = this.#decodeAt(directed, start);
+        if (!match) continue;
+        if (!found.has(match.result.rawText)) found.set(match.result.rawText, match.result);
+        if (stopAtFirst) return [...found.values()];
+        // Resume at the first bar after this symbol; its quiet zone may lead the next symbol.
+        start = match.end - 1;
+      }
     }
-    return null;
+    return [...found.values()];
   }
 
   /** Attempts a full decode assuming the start character begins at bar index `start`. */
-  #decodeAt(runs: Runs, start: number): DecodedBarcode | null {
+  #decodeAt(runs: Runs, start: number): SymbolMatch | null {
     const { minQuietZone } = this.#options;
     const startChar = matchCharacter(runs, start);
     if (startChar?.char !== START_STOP_CHARACTER) return null;
@@ -135,8 +159,10 @@ export class Code39WidthDecoder {
       if (!match || !isWidthConsistent(match, previous)) return null;
 
       if (match.char === START_STOP_CHARACTER) {
-        const trailingQuietZone = runs[gap + 1 + ELEMENTS_PER_CHARACTER] ?? 0;
-        return trailingQuietZone >= minQuietZone * match.narrow ? this.#finish(raw) : null;
+        const end = gap + 1 + ELEMENTS_PER_CHARACTER;
+        if ((runs[end] ?? 0) < minQuietZone * match.narrow) return null;
+        const result = this.#finish(raw);
+        return result && { result, end };
       }
       raw += match.char;
       previous = match;
@@ -146,7 +172,8 @@ export class Code39WidthDecoder {
 
   #finish(raw: string): DecodedBarcode | null {
     if (raw.length < this.#options.minLength) return null;
-    const text = this.#options.fullAscii ? expandFullAscii(raw) : raw;
-    return text === null ? null : { text, rawText: raw, format: BARCODE_FORMAT };
+    // A payload that is not valid Full ASCII is, by definition, plain Code 39.
+    const text = this.#options.fullAscii ? (expandFullAscii(raw) ?? raw) : raw;
+    return { text, rawText: raw, format: BarcodeFormat.Code39 };
   }
 }

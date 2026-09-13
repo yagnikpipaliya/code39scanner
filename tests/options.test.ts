@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { InvalidOptionsError } from '../src/errors.js';
-import { DEFAULT_SCANNER_OPTIONS, resolveScannerOptions } from '../src/options.js';
+import {
+  DEFAULT_SCANNER_OPTIONS,
+  resolveScannerOptions,
+  validateNumberOption,
+} from '../src/options.js';
+import { ScanOrientation } from '../src/types.js';
 
 describe('resolveScannerOptions', () => {
   it('returns frozen defaults', () => {
@@ -9,13 +14,15 @@ describe('resolveScannerOptions', () => {
     expect(Object.isFrozen(options)).toBe(true);
   });
 
-  it('merges overrides and de-duplicates orientations', () => {
+  it('merges overrides, keeps defaults for undefined and de-duplicates orientations', () => {
     const options = resolveScannerOptions({
       scanIntervalMs: 250,
-      orientations: ['vertical', 'vertical'],
-    });
+      orientations: [ScanOrientation.Vertical, ScanOrientation.Vertical],
+      minLength: undefined,
+    } as never);
     expect(options.scanIntervalMs).toBe(250);
-    expect(options.orientations).toEqual(['vertical']);
+    expect(options.minLength).toBe(DEFAULT_SCANNER_OPTIONS.minLength);
+    expect(options.orientations).toEqual([ScanOrientation.Vertical]);
   });
 
   it.each([
@@ -27,5 +34,22 @@ describe('resolveScannerOptions', () => {
     { minLength: 1.5 },
   ])('rejects %j', (options) => {
     expect(() => resolveScannerOptions(options)).toThrow(InvalidOptionsError);
+  });
+});
+
+describe('validateNumberOption', () => {
+  it('returns valid values', () => {
+    expect(validateNumberOption('linePhase', 0.25)).toBe(0.25);
+    expect(validateNumberOption('maxFrameSize', 1280)).toBe(1280);
+  });
+
+  it('rejects non-numbers, out-of-range and non-integer values', () => {
+    expect(() => validateNumberOption('linePhase', '0.5')).toThrow(InvalidOptionsError);
+    expect(() => validateNumberOption('linePhase', 1.01)).toThrow(InvalidOptionsError);
+    expect(() => validateNumberOption('scanLines', 2.5)).toThrow(InvalidOptionsError);
+  });
+
+  it('honours a narrowed upper bound', () => {
+    expect(() => validateNumberOption('minConfirmations', 5, 4)).toThrow('between 1 and 4');
   });
 });

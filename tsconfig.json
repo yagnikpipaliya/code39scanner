@@ -15,9 +15,15 @@
     "forceConsistentCasingInFileNames": true,
     "isolatedModules": true,
     "verbatimModuleSyntax": true,
+    "erasableSyntaxOnly": true,
+    "allowJs": true,
+    "checkJs": true,
+    "paths": {
+      "code39-scanner": ["./src/index.ts"]
+    },
     "skipLibCheck": true,
     "types": ["node"],
     "noEmit": true
   },
-  "include": ["src", "tests", "vite.config.ts", "vitest.config.ts"]
+  "include": ["src", "tests", "demo", "vite.config.ts", "vitest.config.ts"]
 }

@@ -1,9 +1,13 @@
 import { InvalidOptionsError } from './errors.js';
-import type { ScanOrientation } from './types.js';
+import { ScanOrientation } from './types.js';
+import { isEnumValue } from './utils/enum.js';
 
 /** Options for decoding a single scanline of bar/space widths. */
 export interface DecodeOptions {
-  /** Expand Full ASCII shift sequences (`+A` → `a`, `%U` → NUL, …). Default `false`. */
+  /**
+   * Expand Full ASCII shift sequences (`+A` → `a`, `%U` → NUL, …). Payloads that are not valid
+   * Full ASCII are returned as plain Code 39. Default `false`.
+   */
   readonly fullAscii?: boolean;
   /** Minimum number of data characters (excluding start/stop). Default `1`. */
   readonly minLength?: number;
@@ -13,12 +17,22 @@ export interface DecodeOptions {
 
 /** Options for decoding a whole image. */
 export interface ImageDecodeOptions extends DecodeOptions {
-  /** Scanlines sampled per orientation. Default `24`. */
+  /** Primary scanlines sampled per orientation. Default `24`. */
   readonly scanLines?: number;
   /** Scan directions. Default both, so the barcode may be held horizontally or vertically. */
   readonly orientations?: readonly ScanOrientation[];
-  /** Scanlines that must agree on a value before it is reported. Default `2`. */
+  /** Distinct scanlines that must agree on a value before it is reported. Default `2`. */
   readonly minConfirmations?: number;
+}
+
+/** Per-call options for one decoding pass over an image. */
+export interface ScanPassOptions {
+  /**
+   * Position of the primary scanlines within their band, from `0` to `1`. Default `0.5`
+   * (centered). Varying it between frames (as the live scanner does) sweeps the lines across
+   * the whole image, so barcodes smaller than the line spacing are still crossed.
+   */
+  readonly linePhase?: number;
 }
 
 /** Options for the live camera scanner. */
@@ -29,8 +43,9 @@ export interface ScannerOptions extends ImageDecodeOptions {
   readonly presenceTimeoutMs?: number;
   /**
    * Frames are downscaled so their longest side is at most this many pixels. Default `1920`
-   * (full HD). Only sampled scanlines are processed, so full resolution stays cheap and keeps
-   * small barcodes above the ~1.5 px narrow-element minimum.
+   * (full HD). Each frame is drawn once; only the sampled scanlines are read back and converted,
+   * so full resolution costs little memory and keeps small barcodes above the ~1.5 px
+   * narrow-element minimum.
    */
   readonly maxFrameSize?: number;
 }
@@ -44,22 +59,43 @@ export const DEFAULT_SCANNER_OPTIONS: ResolvedScannerOptions = Object.freeze({
   minLength: 1,
   minQuietZone: 5,
   scanLines: 24,
-  orientations: Object.freeze(['horizontal', 'vertical'] as const),
+  orientations: Object.freeze([ScanOrientation.Horizontal, ScanOrientation.Vertical]),
   minConfirmations: 2,
   scanIntervalMs: 100,
   presenceTimeoutMs: 1500,
   maxFrameSize: 1920,
 });
 
-const ORIENTATIONS: readonly ScanOrientation[] = ['horizontal', 'vertical'];
-
-/** Defaults overlaid with the caller's options; explicit `undefined` values keep the default. */
-function withDefaults(options: ScannerOptions | undefined): ResolvedScannerOptions {
-  const defined = Object.entries(options ?? {}).filter(([, value]) => value !== undefined);
-  return { ...DEFAULT_SCANNER_OPTIONS, ...Object.fromEntries(defined) };
+interface NumberRule {
+  readonly min: number;
+  readonly max: number;
+  readonly integer: boolean;
 }
 
-function assertNumber(name: string, value: number, min: number, max: number, integer: boolean) {
+/** Single source of truth for the valid range of every numeric option. */
+const NUMBER_RULES = {
+  minLength: { min: 1, max: 1000, integer: true },
+  minQuietZone: { min: 0, max: 100, integer: false },
+  scanLines: { min: 1, max: 1000, integer: true },
+  minConfirmations: { min: 1, max: 1000, integer: true },
+  linePhase: { min: 0, max: 1, integer: false },
+  scanIntervalMs: { min: 0, max: 60_000, integer: false },
+  presenceTimeoutMs: { min: 0, max: 3_600_000, integer: false },
+  maxFrameSize: { min: 64, max: 8192, integer: true },
+} as const satisfies Readonly<Record<string, NumberRule>>;
+
+export type NumericOptionName = keyof typeof NUMBER_RULES;
+
+/**
+ * Validates a numeric option against its documented range and returns it.
+ * `max` narrows the upper bound when it depends on other options.
+ */
+export function validateNumberOption(
+  name: NumericOptionName,
+  value: unknown,
+  max: number = NUMBER_RULES[name].max,
+): number {
+  const { min, integer } = NUMBER_RULES[name];
   const valid =
     typeof value === 'number' &&
     Number.isFinite(value) &&
@@ -70,6 +106,13 @@ function assertNumber(name: string, value: number, min: number, max: number, int
     const kind = integer ? 'an integer' : 'a number';
     throw new InvalidOptionsError(`"${name}" must be ${kind} between ${min} and ${max}.`);
   }
+  return value;
+}
+
+/** Defaults overlaid with the caller's options; explicit `undefined` values keep the default. */
+function withDefaults(options: ScannerOptions | undefined): ResolvedScannerOptions {
+  const defined = Object.entries(options ?? {}).filter(([, value]) => value !== undefined);
+  return { ...DEFAULT_SCANNER_OPTIONS, ...Object.fromEntries(defined) };
 }
 
 export function resolveDecodeOptions(options?: DecodeOptions): ResolvedDecodeOptions {
@@ -77,50 +120,47 @@ export function resolveDecodeOptions(options?: DecodeOptions): ResolvedDecodeOpt
   if (typeof fullAscii !== 'boolean') {
     throw new InvalidOptionsError('"fullAscii" must be a boolean.');
   }
-  assertNumber('minLength', minLength, 1, 1000, true);
-  assertNumber('minQuietZone', minQuietZone, 0, 100, false);
-  return Object.freeze({ fullAscii, minLength, minQuietZone });
+  return Object.freeze({
+    fullAscii,
+    minLength: validateNumberOption('minLength', minLength),
+    minQuietZone: validateNumberOption('minQuietZone', minQuietZone),
+  });
 }
 
 export function resolveImageDecodeOptions(
   options?: ImageDecodeOptions,
 ): ResolvedImageDecodeOptions {
   const { scanLines, orientations, minConfirmations } = withDefaults(options);
-  assertNumber('scanLines', scanLines, 1, 1000, true);
+  const validScanLines = validateNumberOption('scanLines', scanLines);
   const validOrientations =
     Array.isArray(orientations) &&
     orientations.length > 0 &&
-    orientations.every((o) => ORIENTATIONS.includes(o));
+    orientations.every((orientation) => isEnumValue(ScanOrientation, orientation));
   if (!validOrientations) {
-    throw new InvalidOptionsError(
-      `"orientations" must be a non-empty array of ${ORIENTATIONS.map((o) => `"${o}"`).join(', ')}.`,
-    );
+    const allowed = Object.values(ScanOrientation)
+      .map((orientation) => `"${orientation}"`)
+      .join(', ');
+    throw new InvalidOptionsError(`"orientations" must be a non-empty array of ${allowed}.`);
   }
   const uniqueOrientations = Object.freeze([...new Set(orientations)]);
-  assertNumber(
-    'minConfirmations',
-    minConfirmations,
-    1,
-    scanLines * uniqueOrientations.length,
-    true,
-  );
   return Object.freeze({
     ...resolveDecodeOptions(options),
-    scanLines,
+    scanLines: validScanLines,
     orientations: uniqueOrientations,
-    minConfirmations,
+    minConfirmations: validateNumberOption(
+      'minConfirmations',
+      minConfirmations,
+      validScanLines * uniqueOrientations.length,
+    ),
   });
 }
 
 export function resolveScannerOptions(options?: ScannerOptions): ResolvedScannerOptions {
   const { scanIntervalMs, presenceTimeoutMs, maxFrameSize } = withDefaults(options);
-  assertNumber('scanIntervalMs', scanIntervalMs, 0, 60_000, false);
-  assertNumber('presenceTimeoutMs', presenceTimeoutMs, 0, 3_600_000, false);
-  assertNumber('maxFrameSize', maxFrameSize, 64, 8192, true);
   return Object.freeze({
     ...resolveImageDecodeOptions(options),
-    scanIntervalMs,
-    presenceTimeoutMs,
-    maxFrameSize,
+    scanIntervalMs: validateNumberOption('scanIntervalMs', scanIntervalMs),
+    presenceTimeoutMs: validateNumberOption('presenceTimeoutMs', presenceTimeoutMs),
+    maxFrameSize: validateNumberOption('maxFrameSize', maxFrameSize),
   });
 }
