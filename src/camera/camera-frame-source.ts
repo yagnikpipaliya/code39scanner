@@ -50,9 +50,19 @@ const UNKNOWN_MEDIA_ERROR: readonly [CameraErrorClass, string] = [
 const hasCameraApi = (): boolean =>
   typeof navigator !== 'undefined' && typeof navigator.mediaDevices?.getUserMedia === 'function';
 
-const hasCanvasApi = (): boolean =>
-  typeof OffscreenCanvas !== 'undefined' || typeof document !== 'undefined';
+/** Creates a 2D context (offscreen when available), or `null` if the browser cannot provide one. */
+function createContext2D(): Context2D | null {
+  const settings: CanvasRenderingContext2DSettings = { willReadFrequently: true };
+  if (typeof OffscreenCanvas !== 'undefined') {
+    return new OffscreenCanvas(1, 1).getContext('2d', settings);
+  }
+  if (typeof document !== 'undefined') {
+    return document.createElement('canvas').getContext('2d', settings);
+  }
+  return null;
+}
 
+/** Secure context and camera API. Canvas support is verified by creating the real context. */
 function assertCameraAccess(): void {
   // Checked first: insecure contexts hide `navigator.mediaDevices` entirely.
   if (typeof window !== 'undefined' && window.isSecureContext === false) {
@@ -60,9 +70,6 @@ function assertCameraAccess(): void {
   }
   if (!hasCameraApi()) {
     throw new UnsupportedBrowserError('This browser does not support camera access.');
-  }
-  if (!hasCanvasApi()) {
-    throw new UnsupportedBrowserError('This browser does not support canvas rendering.');
   }
 }
 
@@ -91,14 +98,6 @@ function videoConstraints(deviceId: string | undefined): MediaTrackConstraints {
   };
 }
 
-function createContext2D(): Context2D | null {
-  const settings: CanvasRenderingContext2DSettings = { willReadFrequently: true };
-  if (typeof OffscreenCanvas !== 'undefined') {
-    return new OffscreenCanvas(1, 1).getContext('2d', settings);
-  }
-  return document.createElement('canvas').getContext('2d', settings);
-}
-
 /** Reads single rows/columns back from the canvas instead of copying the whole frame. */
 function luminanceFromContext(context: Context2D, width: number, height: number): LuminanceSource {
   return {
@@ -111,9 +110,12 @@ function luminanceFromContext(context: Context2D, width: number, height: number)
 
 /** Camera-backed `FrameSource` using `getUserMedia`, rendering the preview into a `<video>`. */
 export class CameraFrameSource implements FrameSource {
-  /** Whether the browser offers everything camera scanning needs (camera and 2D canvas). */
+  /**
+   * Whether the browser offers everything camera scanning needs: the camera API and a working
+   * 2D canvas context (probed by creating a 1×1 canvas).
+   */
   static isSupported(): boolean {
-    return hasCameraApi() && hasCanvasApi();
+    return hasCameraApi() && createContext2D() !== null;
   }
 
   /**
@@ -158,9 +160,9 @@ export class CameraFrameSource implements FrameSource {
   }
 
   /**
-   * Opens the camera. Everything frames need (the 2D canvas) is verified first, so the camera is
-   * never switched on in a browser that cannot scan. Safe to call concurrently: a call superseded
-   * by a later `start()` or `stop()` releases what it acquired and rejects with
+   * Opens the camera. The canvas context frames need is created first, so the camera is never
+   * switched on in a browser that cannot scan. Safe to call concurrently: a call superseded by a
+   * later `start()` or `stop()` releases what it acquired and rejects with
    * `OperationCancelledError`.
    */
   async start({ deviceId }: StartOptions = {}): Promise<void> {
@@ -228,7 +230,7 @@ export class CameraFrameSource implements FrameSource {
     return luminanceFromContext(context, width, height);
   }
 
-  /** The reusable canvas context (offscreen when available), created on first use. */
+  /** The reusable canvas context, created on first use. */
   #getContext(): Context2D {
     this.#context ??= createContext2D();
     if (!this.#context) throw new UnsupportedBrowserError('Canvas 2D rendering is not available.');

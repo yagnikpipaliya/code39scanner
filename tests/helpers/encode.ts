@@ -185,6 +185,41 @@ export function rotate90(image: RgbaImage): RgbaImage {
   return { width: height, height: width, data: out };
 }
 
+/**
+ * Rotates a grayscale RGBA image by `degrees` (counter-clockwise) around its center with
+ * bilinear sampling, enlarging the canvas to fit and filling uncovered pixels with `background`.
+ */
+export function rotate(image: RgbaImage, degrees: number, background = 230): RgbaImage {
+  const { width, height, data } = image;
+  const radians = (degrees * Math.PI) / 180;
+  const cos = Math.cos(radians);
+  const sin = Math.sin(radians);
+  const outWidth = Math.ceil(Math.abs(width * cos) + Math.abs(height * sin));
+  const outHeight = Math.ceil(Math.abs(width * sin) + Math.abs(height * cos));
+  const out = new Uint8ClampedArray(outWidth * outHeight * 4);
+  const sample = (x: number, y: number) =>
+    x < 0 || y < 0 || x >= width || y >= height ? background : data[(y * width + x) * 4]!;
+
+  for (let y = 0; y < outHeight; y++) {
+    for (let x = 0; x < outWidth; x++) {
+      const dx = x + 0.5 - outWidth / 2;
+      const dy = y + 0.5 - outHeight / 2;
+      const sx = cos * dx - sin * dy + width / 2 - 0.5;
+      const sy = sin * dx + cos * dy + height / 2 - 0.5;
+      const x0 = Math.floor(sx);
+      const y0 = Math.floor(sy);
+      const fx = sx - x0;
+      const fy = sy - y0;
+      const top = sample(x0, y0) * (1 - fx) + sample(x0 + 1, y0) * fx;
+      const bottom = sample(x0, y0 + 1) * (1 - fx) + sample(x0 + 1, y0 + 1) * fx;
+      const p = (y * outWidth + x) * 4;
+      out[p] = out[p + 1] = out[p + 2] = top * (1 - fy) + bottom * fy;
+      out[p + 3] = 255;
+    }
+  }
+  return { width: outWidth, height: outHeight, data: out };
+}
+
 export interface Placement {
   readonly image: RgbaImage;
   readonly x: number;

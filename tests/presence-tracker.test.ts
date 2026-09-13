@@ -57,4 +57,50 @@ describe('PresenceTracker', () => {
   it.each([Number.NaN, -1, Infinity])('rejects an invalid timeout (%s)', (timeoutMs) => {
     expect(() => new PresenceTracker(timeoutMs)).toThrow(InvalidOptionsError);
   });
+
+  it.each([0, 1.5])('rejects an invalid sighting count (%s)', (minSightings) => {
+    expect(() => new PresenceTracker(1000, () => 0, minSightings)).toThrow(InvalidOptionsError);
+  });
+});
+
+describe('PresenceTracker with minSightings', () => {
+  function setupConfirming(minSightings: number, timeoutMs = 1000) {
+    let now = 0;
+    const tracker = new PresenceTracker(timeoutMs, () => now, minSightings);
+    return { tracker, advance: (ms: number) => (now += ms) };
+  }
+
+  it('reports a key only once it has been seen in enough frames', () => {
+    const { tracker, advance } = setupConfirming(3);
+    expect(tracker.observe(['A'])).toEqual([]);
+    advance(100);
+    expect(tracker.observe(['A'])).toEqual([]);
+    advance(100);
+    expect(tracker.observe(['A'])).toEqual(['A']);
+    advance(100);
+    expect(tracker.observe(['A'])).toEqual([]);
+  });
+
+  it('tolerates missed frames between sightings', () => {
+    const { tracker, advance } = setupConfirming(2);
+    tracker.observe(['A']);
+    advance(500);
+    tracker.observe([]);
+    advance(400);
+    expect(tracker.observe(['A'])).toEqual(['A']);
+  });
+
+  it('forgets a sighting that is not repeated in time', () => {
+    const { tracker, advance } = setupConfirming(2);
+    tracker.observe(['A']);
+    advance(1001);
+    expect(tracker.observe(['A'])).toEqual([]);
+    advance(100);
+    expect(tracker.observe(['A'])).toEqual(['A']);
+  });
+
+  it('counts a key once per frame', () => {
+    const { tracker } = setupConfirming(2);
+    expect(tracker.observe(['A', 'A'])).toEqual([]);
+  });
 });

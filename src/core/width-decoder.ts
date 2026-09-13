@@ -20,13 +20,15 @@ import {
  */
 export type Runs = ArrayLike<number>;
 
-/** A symbol found on a scanline, with its extent along the line (in run units, i.e. pixels). */
+/** A symbol found on a scanline, with its geometry along the line (in run units, i.e. pixels). */
 export interface LineSymbol {
   readonly barcode: DecodedBarcode;
   /** Distance from the start of the line to the symbol's first bar. */
   readonly offset: number;
   /** Extent from the first bar of the start character to the last bar of the stop character. */
   readonly length: number;
+  /** Mean narrow-element width: the symbol's module size. */
+  readonly moduleWidth: number;
 }
 
 // Tolerances. The spec allows a wide:narrow ratio of 2.0–3.0; the extra margin absorbs blur,
@@ -57,6 +59,7 @@ interface SymbolMatch {
   readonly barcode: DecodedBarcode;
   /** Index of the symbol's trailing quiet zone (which may lead into the next symbol). */
   readonly end: number;
+  readonly moduleWidth: number;
 }
 
 interface ReadingDirection {
@@ -127,11 +130,11 @@ function* readingDirections(runs: Runs): Generator<ReadingDirection> {
 function toLineSymbol(
   { runs, reversed }: ReadingDirection,
   start: number,
-  { barcode, end }: SymbolMatch,
+  { barcode, end, moduleWidth }: SymbolMatch,
 ): LineSymbol {
   const length = sumRuns(runs, start, end);
   const offset = reversed ? sumRuns(runs, end, runs.length) : sumRuns(runs, 0, start);
-  return { barcode, offset, length };
+  return { barcode, offset, length, moduleWidth };
 }
 
 /**
@@ -154,7 +157,7 @@ export class Code39WidthDecoder {
     return this.#collect(runs, false).map((symbol) => symbol.barcode);
   }
 
-  /** Every distinct symbol on the scanline, with its position along the line. */
+  /** Every distinct symbol on the scanline, with its geometry along the line. */
   decodeSymbols(runs: Runs): LineSymbol[] {
     return this.#collect(runs, false);
   }
@@ -186,6 +189,8 @@ export class Code39WidthDecoder {
 
     let raw = '';
     let previous = startChar;
+    let narrowSum = startChar.narrow;
+    let characters = 1;
     // `gap` always indexes the light run that follows the previous character.
     for (
       let gap = start + ELEMENTS_PER_CHARACTER;
@@ -196,12 +201,14 @@ export class Code39WidthDecoder {
 
       const match = matchCharacter(runs, gap + 1);
       if (!match || !isWidthConsistent(match, previous)) return null;
+      narrowSum += match.narrow;
+      characters++;
 
       if (match.char === START_STOP_CHARACTER) {
         const end = gap + 1 + ELEMENTS_PER_CHARACTER;
         if ((runs[end] ?? 0) < minQuietZone * match.narrow) return null;
         const barcode = this.#finish(raw);
-        return barcode && { barcode, end };
+        return barcode && { barcode, end, moduleWidth: narrowSum / characters };
       }
       raw += match.char;
       previous = match;

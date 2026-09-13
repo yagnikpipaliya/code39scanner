@@ -25,6 +25,10 @@ describe('resolveScannerOptions', () => {
     expect(options.orientations).toEqual([ScanOrientation.Vertical]);
   });
 
+  it('accepts more confirmations than primary scanlines (the bar walk supplies them)', () => {
+    expect(resolveScannerOptions({ scanLines: 2, minConfirmations: 5 }).minConfirmations).toBe(5);
+  });
+
   it.each([
     { scanIntervalMs: -1 },
     { scanIntervalMs: Number.NaN },
@@ -32,6 +36,8 @@ describe('resolveScannerOptions', () => {
     { maxFrameSize: 10 },
     { maxFrameSize: 640.5 },
     { minLength: 1.5 },
+    { minFrameConfirmations: 0 },
+    { minFrameConfirmations: 2.5 },
   ])('rejects %j', (options) => {
     expect(() => resolveScannerOptions(options)).toThrow(InvalidOptionsError);
   });
@@ -43,13 +49,9 @@ describe('validateNumberOption', () => {
     expect(validateNumberOption('maxFrameSize', 1280)).toBe(1280);
   });
 
-  it('rejects non-numbers, out-of-range and non-integer values', () => {
+  it('rejects non-numbers, out-of-range and non-integer values with the allowed range', () => {
     expect(() => validateNumberOption('linePhase', '0.5')).toThrow(InvalidOptionsError);
-    expect(() => validateNumberOption('linePhase', 1.01)).toThrow(InvalidOptionsError);
-    expect(() => validateNumberOption('scanLines', 2.5)).toThrow(InvalidOptionsError);
-  });
-
-  it('honours a narrowed upper bound', () => {
-    expect(() => validateNumberOption('minConfirmations', 5, 4)).toThrow('between 1 and 4');
+    expect(() => validateNumberOption('linePhase', 1.01)).toThrow('between 0 and 1');
+    expect(() => validateNumberOption('scanLines', 2.5)).toThrow('an integer');
   });
 });

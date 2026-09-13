@@ -21,7 +21,7 @@ export interface ImageDecodeOptions extends DecodeOptions {
   readonly scanLines?: number;
   /** Scan directions. Default both, so the barcode may be held horizontally or vertically. */
   readonly orientations?: readonly ScanOrientation[];
-  /** Distinct scanlines that must agree on a value before it is reported. Default `2`. */
+  /** Independent scanlines that must agree on a value before it is reported. Default `2`. */
   readonly minConfirmations?: number;
 }
 
@@ -41,6 +41,12 @@ export interface ScannerOptions extends ImageDecodeOptions {
   readonly scanIntervalMs?: number;
   /** A barcode is reported again only after being out of view this long, in ms. Default `1500`. */
   readonly presenceTimeoutMs?: number;
+  /**
+   * Frames that must decode a value before it is reported, each within `presenceTimeoutMs` of
+   * the previous one. Default `2`: frames carry independent sensor noise and differently placed
+   * scanlines, so a misread in a single frame is never reported. `1` reports on first sight.
+   */
+  readonly minFrameConfirmations?: number;
   /**
    * Frames are downscaled so their longest side is at most this many pixels. Default `1920`
    * (full HD). Each frame is drawn once; only the sampled scanlines are read back and converted,
@@ -63,6 +69,7 @@ export const DEFAULT_SCANNER_OPTIONS: ResolvedScannerOptions = Object.freeze({
   minConfirmations: 2,
   scanIntervalMs: 100,
   presenceTimeoutMs: 1500,
+  minFrameConfirmations: 2,
   maxFrameSize: 1920,
 });
 
@@ -81,21 +88,15 @@ const NUMBER_RULES = {
   linePhase: { min: 0, max: 1, integer: false },
   scanIntervalMs: { min: 0, max: 60_000, integer: false },
   presenceTimeoutMs: { min: 0, max: 3_600_000, integer: false },
+  minFrameConfirmations: { min: 1, max: 100, integer: true },
   maxFrameSize: { min: 64, max: 8192, integer: true },
 } as const satisfies Readonly<Record<string, NumberRule>>;
 
 export type NumericOptionName = keyof typeof NUMBER_RULES;
 
-/**
- * Validates a numeric option against its documented range and returns it.
- * `max` narrows the upper bound when it depends on other options.
- */
-export function validateNumberOption(
-  name: NumericOptionName,
-  value: unknown,
-  max: number = NUMBER_RULES[name].max,
-): number {
-  const { min, integer } = NUMBER_RULES[name];
+/** Validates a numeric option against its documented range and returns it. */
+export function validateNumberOption(name: NumericOptionName, value: unknown): number {
+  const { min, max, integer } = NUMBER_RULES[name];
   const valid =
     typeof value === 'number' &&
     Number.isFinite(value) &&
@@ -147,20 +148,18 @@ export function resolveImageDecodeOptions(
     ...resolveDecodeOptions(options),
     scanLines: validScanLines,
     orientations: uniqueOrientations,
-    minConfirmations: validateNumberOption(
-      'minConfirmations',
-      minConfirmations,
-      validScanLines * uniqueOrientations.length,
-    ),
+    minConfirmations: validateNumberOption('minConfirmations', minConfirmations),
   });
 }
 
 export function resolveScannerOptions(options?: ScannerOptions): ResolvedScannerOptions {
-  const { scanIntervalMs, presenceTimeoutMs, maxFrameSize } = withDefaults(options);
+  const { scanIntervalMs, presenceTimeoutMs, minFrameConfirmations, maxFrameSize } =
+    withDefaults(options);
   return Object.freeze({
     ...resolveImageDecodeOptions(options),
     scanIntervalMs: validateNumberOption('scanIntervalMs', scanIntervalMs),
     presenceTimeoutMs: validateNumberOption('presenceTimeoutMs', presenceTimeoutMs),
+    minFrameConfirmations: validateNumberOption('minFrameConfirmations', minFrameConfirmations),
     maxFrameSize: validateNumberOption('maxFrameSize', maxFrameSize),
   });
 }

@@ -18,15 +18,16 @@ export interface LuminanceSource {
 /** Anything the decoder accepts: a luminance source, or an RGBA image such as `ImageData`. */
 export type ImageInput = LuminanceSource | RgbaImage;
 
-const isPositiveInteger = (value: unknown): value is number =>
-  Number.isInteger(value) && (value as number) > 0;
+/** Dimensions may be 0: an empty image (e.g. a camera still warming up) contains no barcode. */
+const isDimension = (value: unknown): value is number =>
+  Number.isInteger(value) && (value as number) >= 0;
 
 function hasImageShape(value: unknown, bytesPerPixel: 1 | 4): value is RgbaImage | GrayImage {
   if (typeof value !== 'object' || value === null) return false;
   const { width, height, data } = value as Partial<RgbaImage>;
   return (
-    isPositiveInteger(width) &&
-    isPositiveInteger(height) &&
+    isDimension(width) &&
+    isDimension(height) &&
     typeof data?.length === 'number' &&
     data.length >= width * height * bytesPerPixel
   );
@@ -36,8 +37,8 @@ function isLuminanceSource(value: unknown): value is LuminanceSource {
   if (typeof value !== 'object' || value === null) return false;
   const source = value as Partial<LuminanceSource>;
   return (
-    isPositiveInteger(source.width) &&
-    isPositiveInteger(source.height) &&
+    isDimension(source.width) &&
+    isDimension(source.height) &&
     typeof source.row === 'function' &&
     typeof source.column === 'function'
   );
@@ -47,7 +48,7 @@ function isLuminanceSource(value: unknown): value is LuminanceSource {
 export function assertImage(image: RgbaImage | GrayImage, bytesPerPixel: 1 | 4): void {
   if (!hasImageShape(image, bytesPerPixel)) {
     throw new InvalidArgumentError(
-      `Invalid image: expected positive integer width/height and at least width × height × ${bytesPerPixel} bytes of data.`,
+      `Invalid image: expected non-negative integer width/height and at least width × height × ${bytesPerPixel} bytes of data.`,
     );
   }
 }

@@ -108,11 +108,21 @@ describe('CameraFrameSource', () => {
     }
   });
 
-  it('is supported only with both the camera API and a 2D canvas', () => {
+  it('is supported only with the camera API and a working 2D context', () => {
     vi.stubGlobal('navigator', {});
     expect(CameraFrameSource.isSupported()).toBe(false);
     stubMediaDevices(vi.fn());
     expect(CameraFrameSource.isSupported()).toBe(true);
+    // A canvas that cannot provide a 2D context (blocked, or the context limit reached).
+    vi.stubGlobal(
+      'OffscreenCanvas',
+      class {
+        getContext() {
+          return null;
+        }
+      },
+    );
+    expect(CameraFrameSource.isSupported()).toBe(false);
     vi.stubGlobal('OffscreenCanvas', undefined); // and no `document` in Node
     expect(CameraFrameSource.isSupported()).toBe(false);
   });

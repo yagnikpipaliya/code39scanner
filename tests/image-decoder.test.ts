@@ -8,6 +8,7 @@ import {
   composeImages,
   renderBarcode,
   renderNoise,
+  rotate,
   rotate180,
   rotate90,
   toFullAscii,
@@ -59,12 +60,31 @@ describe('decodeImage', () => {
     expect(decodeImage(image, HORIZONTAL_ONLY)).toBeNull();
   });
 
+  it.each([7, -7])(
+    'decodes a barcode tilted by %s° with bars of spec-minimum height',
+    (degrees) => {
+      // 60px bars on a ~375px symbol (16% of its length). At 7° one horizontal line stays within
+      // the bars end to end for only 60 − 375 · tan 7° ≈ 14px of height, so confirming lines must
+      // fit in that window (they need 3 modules = 6px, not a fraction of the symbol length).
+      const image = rotate(
+        renderBarcode(TEXT, { narrow: 2, height: 100, barHeight: 0.6 }),
+        degrees,
+      );
+      expect(decodeImage(image)?.text).toBe(TEXT);
+    },
+  );
+
+  it('decodes long barcodes with short bars (about 5% of their length)', () => {
+    const image = renderBarcode(TEXT, { narrow: 4, height: 60, barHeight: 0.6 });
+    expect(decodeImage(image)?.text).toBe(TEXT);
+  });
+
   it('decodes Full ASCII when enabled', () => {
     const image = renderBarcode(toFullAscii('abc@123'), { narrow: 2 });
     expect(decodeImage(image, { fullAscii: true })?.text).toBe('abc@123');
   });
 
-  it('returns null for blank and noise images', () => {
+  it('returns null for blank, noise and empty images', () => {
     const blank: RgbaImage = {
       width: 200,
       height: 100,
@@ -72,11 +92,15 @@ describe('decodeImage', () => {
     };
     expect(decodeImage(blank)).toBeNull();
     expect(decodeImage(renderNoise(400, 300))).toBeNull();
+    expect(decodeImage({ width: 0, height: 0, data: new Uint8ClampedArray(0) })).toBeNull();
   });
 
   it('rejects invalid input at the API boundary', () => {
     const tooSmall = { width: 10, height: 10, data: new Uint8ClampedArray(10) };
     expect(() => decodeImage(tooSmall)).toThrow(InvalidArgumentError);
+    expect(() => decodeImage({ width: -1, height: 1, data: new Uint8ClampedArray(4) })).toThrow(
+      InvalidArgumentError,
+    );
     expect(() => decodeImage(null as unknown as RgbaImage)).toThrow(InvalidArgumentError);
   });
 
@@ -91,13 +115,15 @@ describe('decodeImage', () => {
     expect(() => new Code39ImageDecoder({ orientations: ['diagonal' as ScanOrientation] })).toThrow(
       InvalidOptionsError,
     );
-    expect(() => new Code39ImageDecoder({ scanLines: 2, minConfirmations: 5 })).toThrow(
-      InvalidOptionsError,
-    );
+    expect(() => new Code39ImageDecoder({ minConfirmations: 0 })).toThrow(InvalidOptionsError);
   });
 });
 
 describe('Code39ImageDecoder', () => {
+  /** 30px-tall bars (rows 525–554 of 1080) on a ~200px symbol: the spec minimum for its length. */
+  const shortBarcode = () =>
+    luminanceFromRgba(renderBarcode('SMALL', { narrow: 2, height: 1080, barHeight: 30 / 1080 }));
+
   it('accepts RGBA images and luminance sources alike', () => {
     const image = renderBarcode(TEXT, { narrow: 2 });
     const decoder = new Code39ImageDecoder();
@@ -105,10 +131,20 @@ describe('Code39ImageDecoder', () => {
     expect(decoder.decode(luminanceFromRgba(image))?.text).toBe(TEXT);
   });
 
-  it('does not confirm a pattern seen only on nearly identical adjacent lines', () => {
-    // A 2px-tall "barcode" (rows 49–50 of 100) is far below the Code 39 minimum bar height (15%
-    // of its length), like text or a texture that happens to decode. With phase 0.8 the primary
-    // line at row 49 decodes it, but no independent line can confirm it.
+  it('treats an empty luminance source as containing no barcode', () => {
+    const empty = {
+      width: 0,
+      height: 0,
+      row: () => new Uint8Array(0),
+      column: () => new Uint8Array(0),
+    };
+    expect(new Code39ImageDecoder().decodeAll(empty)).toEqual([]);
+  });
+
+  it('does not confirm a pattern seen only on nearly identical adjacent rows', () => {
+    // A 2px-tall "barcode" (rows 49–50 of 100), like text or a texture that happens to decode.
+    // With phase 0.8 the primary line at row 49 decodes it, but confirming lines must be
+    // 3 modules (6px) apart, and nothing 6px away decodes the same value.
     const source = luminanceFromRgba(
       renderBarcode(TEXT, { narrow: 2, height: 100, barHeight: 0.03 }),
     );
@@ -119,15 +155,20 @@ describe('Code39ImageDecoder', () => {
   });
 
   it('confirms a short barcode crossed by a single primary line', () => {
-    // 1080 rows / 24 lines = 45px spacing. The 30px-tall barcode (rows 525–554, the spec
-    // minimum for its length) lies between the lines at phase 0.5 (rows 517 and 562). At phase
-    // 0.1 one line (row 544) crosses it and a probe (row 534) independently confirms it.
-    const source = luminanceFromRgba(
-      renderBarcode('SMALL', { narrow: 2, height: 1080, barHeight: 30 / 1080 }),
-    );
+    // 1080 rows / 24 lines = 45px spacing. At phase 0.5 the lines (rows 517 and 562) miss the
+    // bars; at phase 0.1 the line at row 544 crosses them and the walk along the bars confirms.
     const decoder = new Code39ImageDecoder(HORIZONTAL_ONLY);
-    expect(decoder.decode(source, { linePhase: 0.5 })).toBeNull();
-    expect(decoder.decode(source, { linePhase: 0.1 })?.text).toBe('SMALL');
+    expect(decoder.decode(shortBarcode(), { linePhase: 0.5 })).toBeNull();
+    expect(decoder.decode(shortBarcode(), { linePhase: 0.1 })?.text).toBe('SMALL');
+  });
+
+  it('walks along the bars to collect as many confirmations as they are tall', () => {
+    // From the hit at row 544 the walk finds rows 526, 532, 538 and 550 (6px apart): five
+    // independent lines within the 30px bars, and no more.
+    const decoder = (minConfirmations: number) =>
+      new Code39ImageDecoder({ ...HORIZONTAL_ONLY, minConfirmations });
+    expect(decoder(5).decode(shortBarcode(), { linePhase: 0.1 })?.text).toBe('SMALL');
+    expect(decoder(6).decode(shortBarcode(), { linePhase: 0.1 })).toBeNull();
   });
 
   it('finds two barcodes stacked vertically', () => {

@@ -55,12 +55,17 @@ const INITIAL_LINE_PHASE = 0.5;
 
 /** Consecutive failed frames tolerated before scanning stops; isolated glitches recover. */
 const MAX_CONSECUTIVE_FRAME_FAILURES = 5;
-/** Errors after which retrying the next frame cannot succeed. */
+/**
+ * Errors that retrying the next frame cannot fix: missing browser support, a lost camera, or a
+ * frame source producing invalid frames.
+ */
 const FATAL_ERROR_CODES: ReadonlySet<ErrorCode> = new Set([
   ErrorCode.UnsupportedBrowser,
   ErrorCode.InsecureContext,
   ErrorCode.PermissionDenied,
   ErrorCode.CameraUnavailable,
+  ErrorCode.InvalidArgument,
+  ErrorCode.InvalidOptions,
 ]);
 
 /** Every emitted error is a package error with a stable `code`; the original is kept as `cause`. */
@@ -77,7 +82,8 @@ const isDocumentHidden = (): boolean =>
 
 /**
  * Live Code 39 scanner: pulls frames from a `FrameSource`, decodes them and emits `detect`
- * once per barcode appearance.
+ * once per barcode appearance, after the barcode has been confirmed in `minFrameConfirmations`
+ * frames.
  *
  * Lifecycle calls are serialized, so rapid or overlapping calls (e.g. double clicks) cannot
  * leave the camera in an inconsistent state. `stop()` and `dispose()` additionally take effect
@@ -117,7 +123,11 @@ export class Code39Scanner {
       throw new InvalidOptionsError('Either "video" or "frameSource" must be provided.');
     }
     this.#decoder = new Code39ImageDecoder(resolved);
-    this.#tracker = new PresenceTracker(resolved.presenceTimeoutMs);
+    this.#tracker = new PresenceTracker(
+      resolved.presenceTimeoutMs,
+      monotonicClock,
+      resolved.minFrameConfirmations,
+    );
     this.#scanIntervalMs = resolved.scanIntervalMs;
   }
 
@@ -190,10 +200,17 @@ export class Code39Scanner {
     return this.#serialize(async () => this.#halt());
   }
 
-  /** Detaches all listeners immediately, then stops scanning. */
-  dispose(): Promise<void> {
-    this.#events.clear();
-    return this.stop();
+  /**
+   * Stops scanning, then detaches all listeners. Listeners receive the final
+   * `StateChange → idle`; no `Detect` can follow, because `stop()` cancels a pending start
+   * synchronously.
+   */
+  async dispose(): Promise<void> {
+    try {
+      await this.stop();
+    } finally {
+      this.#events.clear();
+    }
   }
 
   #serialize(task: () => Promise<void>): Promise<void> {

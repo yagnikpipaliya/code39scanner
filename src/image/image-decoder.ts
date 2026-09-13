@@ -14,18 +14,16 @@ import { binarizeLine } from './scanline-binarizer.js';
 const DEFAULT_LINE_PHASE = 0.5;
 
 /**
- * Minimum distance between two scanlines that count as independent confirmations, as a
- * fraction of the symbol length.
+ * Minimum distance between two scanlines that count as independent confirmations, in narrow
+ * bar widths (modules) of the symbol.
  *
- * ISO/IEC 16388 requires Code 39 bars to be at least 15% of the symbol length tall; this is a
- * third of that, leaving room for tilt and cropping. Agreeing lines therefore cross genuinely
- * different parts of the bars, so a pattern that decodes on only a few adjacent pixel rows
- * (text, textures) is never confirmed — while a real barcode confirms however few primary
- * lines cross it.
+ * Lines this far apart sample different pixels of the bars, so a pattern that decodes on a single
+ * pixel row (sensor noise, a text stroke) is not confirmed by its immediate neighbours. Tying the
+ * distance to the module size, not the symbol length, keeps the tilt tolerance close to the
+ * physical limit: a tilted barcode only needs to be crossed end to end by two lines a few modules
+ * apart, not by lines a fixed fraction of its length apart.
  */
-const MIN_CONFIRMATION_SPACING_RATIO = 0.05;
-/** Around a hit, lines are probed at these multiples of the confirmation spacing. */
-const PROBE_MULTIPLES = [1, 2] as const;
+const MIN_CONFIRMATION_SPACING_MODULES = 3;
 
 /** Evenly spaced primary line positions across `length`, ordered from the center outwards. */
 function primaryLinePositions(count: number, length: number, phase: number): number[] {
@@ -36,12 +34,9 @@ function primaryLinePositions(count: number, length: number, phase: number): num
   ).sort((a, b) => Math.abs(a - center) - Math.abs(b - center));
 }
 
-function* probePositions(position: number, spacing: number, length: number): Generator<number> {
-  for (const multiple of PROBE_MULTIPLES) {
-    for (const candidate of [position - multiple * spacing, position + multiple * spacing]) {
-      if (candidate >= 0 && candidate < length) yield candidate;
-    }
-  }
+/** Positions `step` apart, walking from `position` (exclusive) towards one image edge. */
+function* walkFrom(position: number, step: number, length: number): Generator<number> {
+  for (let next = position + step; next >= 0 && next < length; next += step) yield next;
 }
 
 /** Size of the largest subset of sorted `positions` whose members are `spacing` or more apart. */
@@ -91,8 +86,10 @@ class ConfirmationLedger {
  * Finds Code 39 barcodes by sampling scanlines in one or both orientations.
  *
  * A value is reported only after `minConfirmations` independent scanlines agree on it (see
- * {@link MIN_CONFIRMATION_SPACING_RATIO}). When a primary line decodes a value, lines at that
- * spacing are probed as well, so barcodes crossed by a single primary line still confirm.
+ * {@link MIN_CONFIRMATION_SPACING_MODULES}). When a primary line decodes a value, the decoder
+ * walks along the bars in both directions, line by line at that spacing, until the value stops
+ * decoding — so a barcode crossed by a single primary line still confirms, up to as many
+ * independent lines as its bars are tall.
  */
 export class Code39ImageDecoder {
   readonly #options: ResolvedImageDecodeOptions;
@@ -119,6 +116,8 @@ export class Code39ImageDecoder {
     stopAtFirst: boolean,
   ): DecodedBarcode[] {
     const phase = validateNumberOption('linePhase', pass.linePhase ?? DEFAULT_LINE_PHASE);
+    if (source.width === 0 || source.height === 0) return [];
+
     const { orientations, scanLines, minConfirmations } = this.#options;
     const ledger = new ConfirmationLedger();
     const confirmed = new Map<string, DecodedBarcode>();
@@ -129,17 +128,20 @@ export class Code39ImageDecoder {
       const decodeLine = this.#cachedLineDecoder((position) =>
         horizontal ? source.row(position) : source.column(position),
       );
+      const decodes = (position: number, rawText: string) =>
+        decodeLine(position).some((symbol) => symbol.barcode.rawText === rawText);
 
       for (const position of primaryLinePositions(scanLines, length, phase)) {
-        for (const { barcode, length: symbolLength } of decodeLine(position)) {
+        for (const { barcode, moduleWidth } of decodeLine(position)) {
           const { rawText } = barcode;
           if (confirmed.has(rawText)) continue;
 
-          const spacing = Math.max(1, Math.round(symbolLength * MIN_CONFIRMATION_SPACING_RATIO));
+          const spacing = Math.max(1, Math.round(moduleWidth * MIN_CONFIRMATION_SPACING_MODULES));
           let support = ledger.add(rawText, spacing, orientation, position);
-          for (const probe of probePositions(position, spacing, length)) {
-            if (support >= minConfirmations) break;
-            if (decodeLine(probe).some((symbol) => symbol.barcode.rawText === rawText)) {
+          // Walk along the bars in both directions until the value stops decoding.
+          for (const step of [-spacing, spacing]) {
+            for (const probe of walkFrom(position, step, length)) {
+              if (support >= minConfirmations || !decodes(probe, rawText)) break;
               support = ledger.add(rawText, spacing, orientation, probe);
             }
           }
