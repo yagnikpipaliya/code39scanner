@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { InvalidArgumentError } from '../src/errors.js';
 import { TypedEventEmitter } from '../src/events.js';
 
 interface Events {
@@ -37,7 +38,7 @@ describe('TypedEventEmitter', () => {
 
   it('rejects non-function listeners and can be cleared', () => {
     const emitter = new TypedEventEmitter<Events>();
-    expect(() => emitter.on('ping', null as unknown as () => void)).toThrow(TypeError);
+    expect(() => emitter.on('ping', null as unknown as () => void)).toThrow(InvalidArgumentError);
     emitter.on('ping', vi.fn());
     emitter.clear();
     expect(emitter.emit('ping', 1)).toBe(false);

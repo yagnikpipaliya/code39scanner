@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { InvalidArgumentError } from '../src/errors.js';
 import { Code39ImageDecoder } from '../src/image/image-decoder.js';
 import {
   luminanceFromGray,
@@ -28,7 +29,7 @@ describe('luminance sources', () => {
 
   it('rejects inconsistent gray images', () => {
     const invalid: GrayImage = { width: 4, height: 4, data: new Uint8Array(8) };
-    expect(() => luminanceFromGray(invalid)).toThrow(TypeError);
+    expect(() => luminanceFromGray(invalid)).toThrow(InvalidArgumentError);
   });
 
   it('decodes grayscale input', () => {

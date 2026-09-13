@@ -3,29 +3,37 @@ import { defineEnum, type EnumValue } from './utils/enum.js';
 /** Stable, machine-readable error identifiers (safe to switch on or map to messages). */
 export const ErrorCode = defineEnum({
   InvalidOptions: 'INVALID_OPTIONS',
+  InvalidArgument: 'INVALID_ARGUMENT',
   UnsupportedBrowser: 'UNSUPPORTED_BROWSER',
   InsecureContext: 'INSECURE_CONTEXT',
   PermissionDenied: 'PERMISSION_DENIED',
   CameraUnavailable: 'CAMERA_UNAVAILABLE',
   OperationCancelled: 'OPERATION_CANCELLED',
+  FrameProcessingFailed: 'FRAME_PROCESSING_FAILED',
 });
 export type ErrorCode = EnumValue<typeof ErrorCode>;
 
 /**
- * Base class for all errors thrown by this package. Every subclass declares its `name` as a
- * string literal (class names do not survive minification) and a stable `code`.
+ * Base class for every error thrown or emitted by this package. Each subclass declares its
+ * `name` as a string literal (class names do not survive minification) and a stable `code`.
  */
 export abstract class Code39ScannerError extends Error {
   abstract readonly code: ErrorCode;
 }
 
-/** Invalid configuration passed to a public API. */
+/** Invalid configuration passed to a constructor. */
 export class InvalidOptionsError extends Code39ScannerError {
   override readonly name = 'InvalidOptionsError';
   readonly code = ErrorCode.InvalidOptions;
 }
 
-/** The browser lacks the APIs required for camera scanning. */
+/** Invalid input passed to a method (an image, a listener, a device id, …). */
+export class InvalidArgumentError extends Code39ScannerError {
+  override readonly name = 'InvalidArgumentError';
+  readonly code = ErrorCode.InvalidArgument;
+}
+
+/** The browser lacks an API required for camera scanning (camera or 2D canvas). */
 export class UnsupportedBrowserError extends Code39ScannerError {
   override readonly name = 'UnsupportedBrowserError';
   readonly code = ErrorCode.UnsupportedBrowser;
@@ -53,4 +61,10 @@ export class CameraUnavailableError extends Code39ScannerError {
 export class OperationCancelledError extends Code39ScannerError {
   override readonly name = 'OperationCancelledError';
   readonly code = ErrorCode.OperationCancelled;
+}
+
+/** A camera frame could not be processed; `cause` holds the original error. */
+export class FrameProcessingError extends Code39ScannerError {
+  override readonly name = 'FrameProcessingError';
+  readonly code = ErrorCode.FrameProcessingFailed;
 }

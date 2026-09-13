@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { InvalidOptionsError } from '../src/errors.js';
+import { InvalidArgumentError, InvalidOptionsError } from '../src/errors.js';
 import { Code39ImageDecoder, decodeImage } from '../src/image/image-decoder.js';
 import { luminanceFromRgba, toGrayscale } from '../src/image/luminance.js';
 import { binarizeLine } from '../src/image/scanline-binarizer.js';
@@ -74,11 +74,15 @@ describe('decodeImage', () => {
     expect(decodeImage(renderNoise(400, 300))).toBeNull();
   });
 
-  it('validates image input', () => {
-    expect(() => decodeImage({ width: 10, height: 10, data: new Uint8ClampedArray(10) })).toThrow(
-      TypeError,
-    );
-    expect(() => decodeImage(null as unknown as RgbaImage)).toThrow(TypeError);
+  it('rejects invalid input at the API boundary', () => {
+    const tooSmall = { width: 10, height: 10, data: new Uint8ClampedArray(10) };
+    expect(() => decodeImage(tooSmall)).toThrow(InvalidArgumentError);
+    expect(() => decodeImage(null as unknown as RgbaImage)).toThrow(InvalidArgumentError);
+  });
+
+  it('explains how to pass single-channel images', () => {
+    const gray = toGrayscale(renderBarcode(TEXT, { narrow: 2 })) as unknown as RgbaImage;
+    expect(() => decodeImage(gray)).toThrow(/luminanceFromGray/);
   });
 
   it('validates options', () => {
@@ -94,26 +98,36 @@ describe('decodeImage', () => {
 });
 
 describe('Code39ImageDecoder', () => {
-  it('requires minConfirmations distinct agreeing scanlines', () => {
-    // A 2px-tall barcode (rows 49–50 of 100). With phase 0.8 the primary line at row 49 hits it
-    // and the neighbour probe at row 50 confirms it; no third line can.
+  it('accepts RGBA images and luminance sources alike', () => {
+    const image = renderBarcode(TEXT, { narrow: 2 });
+    const decoder = new Code39ImageDecoder();
+    expect(decoder.decode(image)?.text).toBe(TEXT);
+    expect(decoder.decode(luminanceFromRgba(image))?.text).toBe(TEXT);
+  });
+
+  it('does not confirm a pattern seen only on nearly identical adjacent lines', () => {
+    // A 2px-tall "barcode" (rows 49–50 of 100) is far below the Code 39 minimum bar height (15%
+    // of its length), like text or a texture that happens to decode. With phase 0.8 the primary
+    // line at row 49 decodes it, but no independent line can confirm it.
     const source = luminanceFromRgba(
       renderBarcode(TEXT, { narrow: 2, height: 100, barHeight: 0.03 }),
     );
     const decoder = (minConfirmations: number) =>
       new Code39ImageDecoder({ ...HORIZONTAL_ONLY, minConfirmations });
-    expect(decoder(2).decode(source, { linePhase: 0.8 })?.text).toBe(TEXT);
-    expect(decoder(3).decode(source, { linePhase: 0.8 })).toBeNull();
+    expect(decoder(2).decode(source, { linePhase: 0.8 })).toBeNull();
+    expect(decoder(1).decode(source, { linePhase: 0.8 })?.text).toBe(TEXT);
   });
 
-  it('confirms barcodes thinner than the scanline spacing once a line crosses them', () => {
-    // 1080 rows / 24 lines = 45px spacing; the barcode covers rows 530–549 only.
+  it('confirms a short barcode crossed by a single primary line', () => {
+    // 1080 rows / 24 lines = 45px spacing. The 30px-tall barcode (rows 525–554, the spec
+    // minimum for its length) lies between the lines at phase 0.5 (rows 517 and 562). At phase
+    // 0.1 one line (row 544) crosses it and a probe (row 534) independently confirms it.
     const source = luminanceFromRgba(
-      renderBarcode(TEXT, { narrow: 2, height: 1080, barHeight: 20 / 1080 }),
+      renderBarcode('SMALL', { narrow: 2, height: 1080, barHeight: 30 / 1080 }),
     );
     const decoder = new Code39ImageDecoder(HORIZONTAL_ONLY);
-    expect(decoder.decode(source, { linePhase: 0.5 })).toBeNull(); // lines at rows 517 and 562
-    expect(decoder.decode(source, { linePhase: 0.9 })?.text).toBe(TEXT); // line at row 535
+    expect(decoder.decode(source, { linePhase: 0.5 })).toBeNull();
+    expect(decoder.decode(source, { linePhase: 0.1 })?.text).toBe('SMALL');
   });
 
   it('finds two barcodes stacked vertically', () => {
@@ -124,29 +138,27 @@ describe('Code39ImageDecoder', () => {
       { image: bottom, x: 0, y: 60 },
     ]);
     const texts = new Code39ImageDecoder(HORIZONTAL_ONLY)
-      .decodeAll(luminanceFromRgba(image))
+      .decodeAll(image)
       .map((r) => r.text)
       .sort();
     expect(texts).toEqual(['BOTTOM', 'TOP']);
   });
 
   it('finds two barcodes side by side on the same scanlines', () => {
-    const left = renderBarcode('LEFT', { narrow: 2 });
-    const right = renderBarcode('RIGHT', { narrow: 2 });
-    const image = composeImages(left.width + right.width, left.height, [
+    const left = renderBarcode('LEFT', { narrow: 2, height: 80 });
+    const right = renderBarcode('RIGHT', { narrow: 2, height: 80 });
+    const image = composeImages(left.width + right.width, 80, [
       { image: left, x: 0, y: 0 },
       { image: right, x: left.width, y: 0 },
     ]);
-    const texts = new Code39ImageDecoder(HORIZONTAL_ONLY)
-      .decodeAll(luminanceFromRgba(image))
-      .map((r) => r.text);
+    const texts = new Code39ImageDecoder(HORIZONTAL_ONLY).decodeAll(image).map((r) => r.text);
     expect(texts).toEqual(['LEFT', 'RIGHT']);
   });
 
   it('validates the line phase', () => {
-    const source = luminanceFromRgba(renderBarcode(TEXT, { narrow: 2 }));
+    const image = renderBarcode(TEXT, { narrow: 2 });
     for (const linePhase of [-0.1, 1.5, Number.NaN]) {
-      expect(() => new Code39ImageDecoder().decode(source, { linePhase })).toThrow(
+      expect(() => new Code39ImageDecoder().decode(image, { linePhase })).toThrow(
         InvalidOptionsError,
       );
     }

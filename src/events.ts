@@ -1,3 +1,5 @@
+import { InvalidArgumentError } from './errors.js';
+
 export type Listener<T> = (payload: T) => void;
 
 /**
@@ -9,7 +11,9 @@ export class TypedEventEmitter<Events extends object> {
 
   /** Subscribes to `type`. Returns an unsubscribe function. */
   on<K extends keyof Events>(type: K, listener: Listener<Events[K]>): () => void {
-    if (typeof listener !== 'function') throw new TypeError('Listener must be a function.');
+    if (typeof listener !== 'function') {
+      throw new InvalidArgumentError('Listener must be a function.');
+    }
     let listeners = this.#listeners.get(type);
     if (!listeners) {
       listeners = new Set();

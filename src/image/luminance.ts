@@ -1,3 +1,4 @@
+import { InvalidArgumentError } from '../errors.js';
 import type { GrayImage, RgbaImage } from '../types.js';
 
 /**
@@ -14,19 +15,39 @@ export interface LuminanceSource {
   column(x: number): Uint8Array;
 }
 
+/** Anything the decoder accepts: a luminance source, or an RGBA image such as `ImageData`. */
+export type ImageInput = LuminanceSource | RgbaImage;
+
+const isPositiveInteger = (value: unknown): value is number =>
+  Number.isInteger(value) && (value as number) > 0;
+
+function hasImageShape(value: unknown, bytesPerPixel: 1 | 4): value is RgbaImage | GrayImage {
+  if (typeof value !== 'object' || value === null) return false;
+  const { width, height, data } = value as Partial<RgbaImage>;
+  return (
+    isPositiveInteger(width) &&
+    isPositiveInteger(height) &&
+    typeof data?.length === 'number' &&
+    data.length >= width * height * bytesPerPixel
+  );
+}
+
+function isLuminanceSource(value: unknown): value is LuminanceSource {
+  if (typeof value !== 'object' || value === null) return false;
+  const source = value as Partial<LuminanceSource>;
+  return (
+    isPositiveInteger(source.width) &&
+    isPositiveInteger(source.height) &&
+    typeof source.row === 'function' &&
+    typeof source.column === 'function'
+  );
+}
+
 /** Validates image dimensions against its buffer size. */
 export function assertImage(image: RgbaImage | GrayImage, bytesPerPixel: 1 | 4): void {
-  const { width, height, data } = image ?? {};
-  const valid =
-    Number.isInteger(width) &&
-    Number.isInteger(height) &&
-    width > 0 &&
-    height > 0 &&
-    data !== undefined &&
-    data.length >= width * height * bytesPerPixel;
-  if (!valid) {
-    throw new TypeError(
-      `Invalid image: expected positive integer width/height and at least width*height*${bytesPerPixel} bytes of data.`,
+  if (!hasImageShape(image, bytesPerPixel)) {
+    throw new InvalidArgumentError(
+      `Invalid image: expected positive integer width/height and at least width × height × ${bytesPerPixel} bytes of data.`,
     );
   }
 }
@@ -75,6 +96,19 @@ export function luminanceFromGray(image: GrayImage): LuminanceSource {
       return line;
     },
   };
+}
+
+/**
+ * Normalizes decoder input: luminance sources pass through, RGBA images are wrapped.
+ * Anything else fails here, at the API boundary, with an actionable message.
+ */
+export function toLuminanceSource(input: ImageInput): LuminanceSource {
+  if (isLuminanceSource(input)) return input;
+  if (hasImageShape(input, 4)) return luminanceFromRgba(input);
+  throw new InvalidArgumentError(
+    'Expected an RGBA image such as ImageData (width × height × 4 bytes) or a LuminanceSource. ' +
+      'Wrap single-channel images with luminanceFromGray().',
+  );
 }
 
 /** Converts a whole RGBA image to luminance. */

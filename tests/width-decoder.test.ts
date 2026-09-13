@@ -121,6 +121,18 @@ describe('Code39WidthDecoder.decodeAll', () => {
     expect(texts(joinRuns(encodeRuns('SAME'), encodeRuns('SAME')))).toEqual(['SAME']);
   });
 
+  it('locates each symbol along the line, in either reading direction', () => {
+    const left = encodeRuns('LEFT');
+    const right = encodeRuns('RIGHT').reverse();
+    const quietZone = left[0]!;
+    const symbolLength = (runs: number[]) => runs.reduce((sum, w) => sum + w, 0) - 2 * quietZone;
+    const symbols = decoder.decodeSymbols(joinRuns(left, right));
+    expect(symbols.map(({ barcode, offset, length }) => [barcode.text, offset, length])).toEqual([
+      ['LEFT', quietZone, symbolLength(left)],
+      ['RIGHT', left.reduce((sum, w) => sum + w, 0) + quietZone, symbolLength(right)],
+    ]);
+  });
+
   it('returns an empty list when nothing decodes', () => {
     expect(decoder.decodeAll([10, 1, 10])).toEqual([]);
   });

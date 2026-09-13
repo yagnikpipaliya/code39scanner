@@ -21,10 +21,12 @@ export {
   luminanceFromGray,
   luminanceFromRgba,
   toGrayscale,
+  toLuminanceSource,
+  type ImageInput,
   type LuminanceSource,
 } from './image/luminance.js';
 export { binarizeLine } from './image/scanline-binarizer.js';
-export { Code39WidthDecoder, type Runs } from './core/width-decoder.js';
+export { Code39WidthDecoder, type LineSymbol, type Runs } from './core/width-decoder.js';
 export { expandFullAscii } from './core/full-ascii.js';
 export { CODE39_ALPHABET } from './core/symbology.js';
 
@@ -50,7 +52,9 @@ export {
   CameraUnavailableError,
   Code39ScannerError,
   ErrorCode,
+  FrameProcessingError,
   InsecureContextError,
+  InvalidArgumentError,
   InvalidOptionsError,
   OperationCancelledError,
   PermissionDeniedError,

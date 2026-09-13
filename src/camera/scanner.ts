@@ -1,5 +1,13 @@
 import { monotonicClock } from '../clock.js';
-import { CameraUnavailableError, InvalidOptionsError } from '../errors.js';
+import {
+  CameraUnavailableError,
+  Code39ScannerError,
+  ErrorCode,
+  FrameProcessingError,
+  InvalidArgumentError,
+  InvalidOptionsError,
+  OperationCancelledError,
+} from '../errors.js';
 import { TypedEventEmitter, type Listener } from '../events.js';
 import { Code39ImageDecoder } from '../image/image-decoder.js';
 import { resolveScannerOptions, type ScannerOptions } from '../options.js';
@@ -19,7 +27,7 @@ export type ScannerState = EnumValue<typeof ScannerState>;
 export const ScannerEvent = defineEnum({
   /** A barcode came into view. */
   Detect: 'detect',
-  /** A runtime failure while scanning (e.g. the camera was disconnected). */
+  /** A failure while scanning (e.g. the camera was disconnected). */
   Error: 'error',
   StateChange: 'statechange',
 });
@@ -27,7 +35,7 @@ export type ScannerEvent = EnumValue<typeof ScannerEvent>;
 
 export interface ScannerEventMap {
   [ScannerEvent.Detect]: ScanResult;
-  [ScannerEvent.Error]: Error;
+  [ScannerEvent.Error]: Code39ScannerError;
   [ScannerEvent.StateChange]: ScannerState;
 }
 
@@ -45,8 +53,24 @@ export interface Code39ScannerOptions extends ScannerOptions {
 const LINE_PHASE_STEP = (Math.sqrt(5) - 1) / 2;
 const INITIAL_LINE_PHASE = 0.5;
 
-const toError = (value: unknown): Error =>
-  value instanceof Error ? value : new Error(String(value));
+/** Consecutive failed frames tolerated before scanning stops; isolated glitches recover. */
+const MAX_CONSECUTIVE_FRAME_FAILURES = 5;
+/** Errors after which retrying the next frame cannot succeed. */
+const FATAL_ERROR_CODES: ReadonlySet<ErrorCode> = new Set([
+  ErrorCode.UnsupportedBrowser,
+  ErrorCode.InsecureContext,
+  ErrorCode.PermissionDenied,
+  ErrorCode.CameraUnavailable,
+]);
+
+/** Every emitted error is a package error with a stable `code`; the original is kept as `cause`. */
+const toScannerError = (error: unknown): Code39ScannerError =>
+  error instanceof Code39ScannerError
+    ? error
+    : new FrameProcessingError('Failed to process a camera frame.', { cause: error });
+
+const cancelledStart = (cause?: unknown) =>
+  new OperationCancelledError('Scanner start was cancelled by stop() or dispose().', { cause });
 
 const isDocumentHidden = (): boolean =>
   typeof document !== 'undefined' && document.visibilityState === 'hidden';
@@ -55,10 +79,12 @@ const isDocumentHidden = (): boolean =>
  * Live Code 39 scanner: pulls frames from a `FrameSource`, decodes them and emits `detect`
  * once per barcode appearance.
  *
- * Lifecycle calls (`start`, `switchCamera`, `stop`, `dispose`) are serialized, so rapid or
- * overlapping calls (e.g. double clicks) cannot leave the camera in an inconsistent state.
+ * Lifecycle calls are serialized, so rapid or overlapping calls (e.g. double clicks) cannot
+ * leave the camera in an inconsistent state. `stop()` and `dispose()` additionally take effect
+ * immediately: they cancel a `start()` that is still pending (e.g. on a permission prompt).
  */
 export class Code39Scanner {
+  /** Whether the browser offers everything camera scanning needs. */
   static isSupported(): boolean {
     return CameraFrameSource.isSupported();
   }
@@ -75,7 +101,10 @@ export class Code39Scanner {
   #state: ScannerState = ScannerState.Idle;
   #timer: ReturnType<typeof setTimeout> | undefined;
   #queue: Promise<unknown> = Promise.resolve();
+  /** Incremented by `stop()`; a `start()` that observes a change was cancelled. */
+  #generation = 0;
   #linePhase = INITIAL_LINE_PHASE;
+  #consecutiveFailures = 0;
 
   constructor(options: Code39ScannerOptions) {
     const { video, frameSource, ...scannerOptions } = options ?? {};
@@ -110,10 +139,13 @@ export class Code39Scanner {
 
   /**
    * Starts scanning. If already scanning, restarts only when a different `deviceId` is requested.
-   * Rejects with a typed error (`PermissionDeniedError`, `CameraUnavailableError`, …).
+   * Rejects with a typed error (`PermissionDeniedError`, `CameraUnavailableError`, …), or with
+   * `OperationCancelledError` if `stop()`/`dispose()` is called before it completes.
    */
   start(options: StartOptions = {}): Promise<void> {
+    const generation = this.#generation;
     return this.#serialize(async () => {
+      if (generation !== this.#generation) throw cancelledStart();
       const sameDevice =
         options.deviceId === undefined || options.deviceId === this.#source.activeDeviceId;
       if (this.#state === ScannerState.Scanning && sameDevice) return;
@@ -124,11 +156,16 @@ export class Code39Scanner {
       this.#setState(ScannerState.Starting);
       try {
         await this.#source.start(options);
+        if (generation !== this.#generation) throw cancelledStart();
       } catch (error) {
         this.#halt();
-        throw error;
+        const superseded = generation !== this.#generation;
+        throw superseded && !(error instanceof OperationCancelledError)
+          ? cancelledStart(error)
+          : error;
       }
       this.#tracker.reset();
+      this.#consecutiveFailures = 0;
       this.#setState(ScannerState.Scanning);
       this.#scheduleTick(0);
     });
@@ -136,19 +173,27 @@ export class Code39Scanner {
 
   switchCamera(deviceId: string): Promise<void> {
     if (typeof deviceId !== 'string' || deviceId === '') {
-      return Promise.reject(new InvalidOptionsError('"deviceId" must be a non-empty string.'));
+      return Promise.reject(new InvalidArgumentError('"deviceId" must be a non-empty string.'));
     }
     return this.start({ deviceId });
   }
 
+  /**
+   * Stops scanning and releases the camera. Takes effect immediately, including on a pending
+   * `start()` (which then rejects with `OperationCancelledError`).
+   */
   stop(): Promise<void> {
+    this.#generation++;
+    this.#cancelTick();
+    // Releasing the source now also aborts an in-flight camera request (a permission prompt).
+    this.#source.stop();
     return this.#serialize(async () => this.#halt());
   }
 
-  /** Stops scanning and removes all listeners. */
-  async dispose(): Promise<void> {
-    await this.stop();
+  /** Detaches all listeners immediately, then stops scanning. */
+  dispose(): Promise<void> {
     this.#events.clear();
+    return this.stop();
   }
 
   #serialize(task: () => Promise<void>): Promise<void> {
@@ -162,6 +207,12 @@ export class Code39Scanner {
     this.#source.stop();
     this.#tracker.reset();
     this.#setState(ScannerState.Idle);
+  }
+
+  /** Stops scanning because of an unrecoverable error, then reports it. */
+  #fail(error: Code39ScannerError): void {
+    this.#halt();
+    this.#reportError(error);
   }
 
   #setState(state: ScannerState): void {
@@ -184,16 +235,25 @@ export class Code39Scanner {
     if (this.#state !== ScannerState.Scanning) return;
 
     if (!this.#source.isActive) {
-      this.#halt();
-      this.#reportError(new CameraUnavailableError('The camera stream ended unexpectedly.'));
+      this.#fail(new CameraUnavailableError('The camera stream ended unexpectedly.'));
       return;
     }
 
     const startedAt = monotonicClock();
     try {
       this.#scanFrame();
-    } catch (error) {
-      this.#reportError(toError(error));
+      this.#consecutiveFailures = 0;
+    } catch (thrown) {
+      const error = toScannerError(thrown);
+      this.#consecutiveFailures++;
+      if (
+        FATAL_ERROR_CODES.has(error.code) ||
+        this.#consecutiveFailures >= MAX_CONSECUTIVE_FRAME_FAILURES
+      ) {
+        this.#fail(error);
+        return;
+      }
+      this.#reportError(error);
     }
     // A listener may have stopped the scanner during this tick.
     if (this.#state === ScannerState.Scanning && this.#timer === undefined) {
@@ -218,7 +278,7 @@ export class Code39Scanner {
     }
   }
 
-  #reportError(error: Error): void {
+  #reportError(error: Code39ScannerError): void {
     if (this.#events.emit(ScannerEvent.Error, error)) return;
     // Never swallow errors silently when nobody listens.
     if (typeof reportError === 'function') reportError(error);

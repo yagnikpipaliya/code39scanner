@@ -20,6 +20,15 @@ import {
  */
 export type Runs = ArrayLike<number>;
 
+/** A symbol found on a scanline, with its extent along the line (in run units, i.e. pixels). */
+export interface LineSymbol {
+  readonly barcode: DecodedBarcode;
+  /** Distance from the start of the line to the symbol's first bar. */
+  readonly offset: number;
+  /** Extent from the first bar of the start character to the last bar of the stop character. */
+  readonly length: number;
+}
+
 // Tolerances. The spec allows a wide:narrow ratio of 2.0–3.0; the extra margin absorbs blur,
 // print gain and sampling error.
 const MIN_WIDE_NARROW_RATIO = 1.6;
@@ -45,9 +54,14 @@ interface CharacterMatch {
 }
 
 interface SymbolMatch {
-  readonly result: DecodedBarcode;
+  readonly barcode: DecodedBarcode;
   /** Index of the symbol's trailing quiet zone (which may lead into the next symbol). */
   readonly end: number;
+}
+
+interface ReadingDirection {
+  readonly runs: Runs;
+  readonly reversed: boolean;
 }
 
 /**
@@ -97,10 +111,27 @@ export function matchCharacter(runs: Runs, offset: number): CharacterMatch | nul
 const isWidthConsistent = (current: CharacterMatch, previous: CharacterMatch): boolean =>
   Math.abs(current.width - previous.width) <= previous.width * MAX_CHARACTER_WIDTH_CHANGE;
 
+function sumRuns(runs: Runs, from: number, to: number): number {
+  let sum = 0;
+  for (let i = from; i < to; i++) sum += runs[i]!;
+  return sum;
+}
+
 /** The runs as read left-to-right, then reversed (restores the order of an upside-down symbol). */
-function* readingDirections(runs: Runs): Generator<Runs> {
-  yield runs;
-  yield Array.from(runs).reverse();
+function* readingDirections(runs: Runs): Generator<ReadingDirection> {
+  yield { runs, reversed: false };
+  yield { runs: Array.from(runs).reverse(), reversed: true };
+}
+
+/** Locates a match on the original (unreversed) line. */
+function toLineSymbol(
+  { runs, reversed }: ReadingDirection,
+  start: number,
+  { barcode, end }: SymbolMatch,
+): LineSymbol {
+  const length = sumRuns(runs, start, end);
+  const offset = reversed ? sumRuns(runs, end, runs.length) : sumRuns(runs, 0, start);
+  return { barcode, offset, length };
 }
 
 /**
@@ -115,21 +146,29 @@ export class Code39WidthDecoder {
 
   /** The first symbol on the scanline, or `null`. */
   decode(runs: Runs): DecodedBarcode | null {
-    return this.#collect(runs, true)[0] ?? null;
+    return this.#collect(runs, true)[0]?.barcode ?? null;
   }
 
   /** Every distinct symbol on the scanline (e.g. two labels side by side). */
   decodeAll(runs: Runs): DecodedBarcode[] {
+    return this.#collect(runs, false).map((symbol) => symbol.barcode);
+  }
+
+  /** Every distinct symbol on the scanline, with its position along the line. */
+  decodeSymbols(runs: Runs): LineSymbol[] {
     return this.#collect(runs, false);
   }
 
-  #collect(runs: Runs, stopAtFirst: boolean): DecodedBarcode[] {
-    const found = new Map<string, DecodedBarcode>();
-    for (const directed of readingDirections(runs)) {
+  #collect(runs: Runs, stopAtFirst: boolean): LineSymbol[] {
+    const found = new Map<string, LineSymbol>();
+    for (const direction of readingDirections(runs)) {
+      const directed = direction.runs;
       for (let start = 1; start + ELEMENTS_PER_CHARACTER < directed.length; start += 2) {
         const match = this.#decodeAt(directed, start);
         if (!match) continue;
-        if (!found.has(match.result.rawText)) found.set(match.result.rawText, match.result);
+        if (!found.has(match.barcode.rawText)) {
+          found.set(match.barcode.rawText, toLineSymbol(direction, start, match));
+        }
         if (stopAtFirst) return [...found.values()];
         // Resume at the first bar after this symbol; its quiet zone may lead the next symbol.
         start = match.end - 1;
@@ -161,8 +200,8 @@ export class Code39WidthDecoder {
       if (match.char === START_STOP_CHARACTER) {
         const end = gap + 1 + ELEMENTS_PER_CHARACTER;
         if ((runs[end] ?? 0) < minQuietZone * match.narrow) return null;
-        const result = this.#finish(raw);
-        return result && { result, end };
+        const barcode = this.#finish(raw);
+        return barcode && { barcode, end };
       }
       raw += match.char;
       previous = match;
@@ -172,7 +211,7 @@ export class Code39WidthDecoder {
 
   #finish(raw: string): DecodedBarcode | null {
     if (raw.length < this.#options.minLength) return null;
-    // A payload that is not valid Full ASCII is, by definition, plain Code 39.
+    // A payload that is not valid Full ASCII as a whole is, by definition, plain Code 39.
     const text = this.#options.fullAscii ? (expandFullAscii(raw) ?? raw) : raw;
     return { text, rawText: raw, format: BarcodeFormat.Code39 };
   }

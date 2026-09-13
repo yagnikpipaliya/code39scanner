@@ -47,13 +47,22 @@ const UNKNOWN_MEDIA_ERROR: readonly [CameraErrorClass, string] = [
   'Unable to access the camera.',
 ];
 
+const hasCameraApi = (): boolean =>
+  typeof navigator !== 'undefined' && typeof navigator.mediaDevices?.getUserMedia === 'function';
+
+const hasCanvasApi = (): boolean =>
+  typeof OffscreenCanvas !== 'undefined' || typeof document !== 'undefined';
+
 function assertCameraAccess(): void {
   // Checked first: insecure contexts hide `navigator.mediaDevices` entirely.
   if (typeof window !== 'undefined' && window.isSecureContext === false) {
     throw new InsecureContextError('Camera access requires a secure context (HTTPS or localhost).');
   }
-  if (!CameraFrameSource.isSupported()) {
+  if (!hasCameraApi()) {
     throw new UnsupportedBrowserError('This browser does not support camera access.');
+  }
+  if (!hasCanvasApi()) {
+    throw new UnsupportedBrowserError('This browser does not support canvas rendering.');
   }
 }
 
@@ -102,10 +111,9 @@ function luminanceFromContext(context: Context2D, width: number, height: number)
 
 /** Camera-backed `FrameSource` using `getUserMedia`, rendering the preview into a `<video>`. */
 export class CameraFrameSource implements FrameSource {
+  /** Whether the browser offers everything camera scanning needs (camera and 2D canvas). */
   static isSupported(): boolean {
-    return (
-      typeof navigator !== 'undefined' && typeof navigator.mediaDevices?.getUserMedia === 'function'
-    );
+    return hasCameraApi() && hasCanvasApi();
   }
 
   /**
@@ -150,11 +158,14 @@ export class CameraFrameSource implements FrameSource {
   }
 
   /**
-   * Opens the camera. Safe to call concurrently: a call superseded by a later `start()` or
-   * `stop()` releases whatever it acquired and rejects with `OperationCancelledError`.
+   * Opens the camera. Everything frames need (the 2D canvas) is verified first, so the camera is
+   * never switched on in a browser that cannot scan. Safe to call concurrently: a call superseded
+   * by a later `start()` or `stop()` releases what it acquired and rejects with
+   * `OperationCancelledError`.
    */
   async start({ deviceId }: StartOptions = {}): Promise<void> {
     assertCameraAccess();
+    this.#getContext();
     this.stop();
     const generation = this.#generation;
     const isSuperseded = () => generation !== this.#generation;
@@ -217,7 +228,7 @@ export class CameraFrameSource implements FrameSource {
     return luminanceFromContext(context, width, height);
   }
 
-  /** Lazily creates one reusable canvas (offscreen when available). */
+  /** The reusable canvas context (offscreen when available), created on first use. */
   #getContext(): Context2D {
     this.#context ??= createContext2D();
     if (!this.#context) throw new UnsupportedBrowserError('Canvas 2D rendering is not available.');

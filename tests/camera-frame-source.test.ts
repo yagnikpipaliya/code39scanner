@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CameraFrameSource } from '../src/camera/camera-frame-source.js';
 import {
   CameraUnavailableError,
@@ -10,6 +10,7 @@ import {
 } from '../src/errors.js';
 import { Code39ImageDecoder } from '../src/image/image-decoder.js';
 import type { RgbaImage } from '../src/types.js';
+import { deferred } from './helpers/deferred.js';
 import { renderBarcode } from './helpers/encode.js';
 
 interface FakeTrack {
@@ -44,16 +45,6 @@ function fakeVideo() {
 }
 
 const asVideo = (video: ReturnType<typeof fakeVideo>) => video as unknown as HTMLVideoElement;
-
-function deferred<T>() {
-  let resolve!: (value: T) => void;
-  let reject!: (reason: unknown) => void;
-  const promise = new Promise<T>((res, rej) => {
-    resolve = res;
-    reject = rej;
-  });
-  return { promise, resolve, reject };
-}
 
 function stubMediaDevices(
   getUserMedia: (...args: unknown[]) => Promise<MediaStream>,
@@ -97,6 +88,10 @@ function stubCanvas(frame?: RgbaImage) {
   return { drawImage, reads };
 }
 
+beforeEach(() => {
+  stubCanvas();
+});
+
 afterEach(() => {
   vi.unstubAllGlobals();
 });
@@ -113,11 +108,13 @@ describe('CameraFrameSource', () => {
     }
   });
 
-  it('reports support based on getUserMedia', () => {
+  it('is supported only with both the camera API and a 2D canvas', () => {
     vi.stubGlobal('navigator', {});
     expect(CameraFrameSource.isSupported()).toBe(false);
     stubMediaDevices(vi.fn());
     expect(CameraFrameSource.isSupported()).toBe(true);
+    vi.stubGlobal('OffscreenCanvas', undefined); // and no `document` in Node
+    expect(CameraFrameSource.isSupported()).toBe(false);
   });
 
   it('rejects in insecure contexts and unsupported browsers', async () => {
@@ -130,6 +127,23 @@ describe('CameraFrameSource', () => {
     await expect(new CameraFrameSource(asVideo(fakeVideo())).start()).rejects.toBeInstanceOf(
       UnsupportedBrowserError,
     );
+  });
+
+  it('refuses to start without a 2D canvas, before switching the camera on', async () => {
+    vi.stubGlobal(
+      'OffscreenCanvas',
+      class {
+        getContext() {
+          return null;
+        }
+      },
+    );
+    const getUserMedia = vi.fn(async () => fakeStream().stream);
+    stubMediaDevices(getUserMedia);
+    await expect(new CameraFrameSource(asVideo(fakeVideo())).start()).rejects.toBeInstanceOf(
+      UnsupportedBrowserError,
+    );
+    expect(getUserMedia).not.toHaveBeenCalled();
   });
 
   it('plays the rear camera in the video element and releases it on stop', async () => {

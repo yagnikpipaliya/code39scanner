@@ -77,8 +77,15 @@ export function seededRandom(seed: number): () => number {
   };
 }
 
+/** ISO/IEC 16388: bars must be at least 15% of the symbol length tall. */
+const MIN_BAR_HEIGHT_RATIO = 0.15;
+const MIN_IMAGE_HEIGHT = 60;
+
 export interface RenderOptions extends EncodeOptions {
-  /** Image height in pixels. Default 60. */
+  /**
+   * Image height in pixels. Default: tall enough for spec-compliant bars (at least 15% of the
+   * image width), and at least 60.
+   */
   height?: number;
   /** Vertical fraction of the image covered by bars. Default 0.6. */
   barHeight?: number;
@@ -98,7 +105,6 @@ export interface RenderOptions extends EncodeOptions {
 /** Renders `text` as an anti-aliased RGBA barcode image. */
 export function renderBarcode(text: string, options: RenderOptions = {}): RgbaImage {
   const {
-    height = 60,
     barHeight = 0.6,
     margin = 0,
     light = 230,
@@ -111,6 +117,9 @@ export function renderBarcode(text: string, options: RenderOptions = {}): RgbaIm
   const runs = encodeRuns(text, options);
   const total = runs.reduce((sum, w) => sum + w, 0);
   const width = Math.ceil(total + 2 * margin);
+  const height =
+    options.height ??
+    Math.max(MIN_IMAGE_HEIGHT, Math.ceil((width * MIN_BAR_HEIGHT_RATIO) / barHeight));
 
   // Dark coverage per pixel column (exact area coverage → anti-aliasing).
   let profile: Float32Array = new Float32Array(width);
