@@ -1,29 +1,28 @@
 import { monotonicClock, type Clock } from '../clock.js';
 import { validateNumberOption } from '../options.js';
 
-interface Presence {
-  lastSeenAt: number;
-  sightings: number;
-  reported: boolean;
-}
-
 /**
  * Turns a stream of per-frame detections into discrete "appeared" events.
  *
- * A key is reported once it has been seen in `minSightings` frames, each within `timeoutMs` of
- * the previous sighting, and again only after it has been absent for longer than `timeoutMs`.
- * Occasional missed frames therefore neither cause duplicate reports nor reset confirmation.
+ * - **Confirmation is counted in frames.** A key must be seen in `minSightings` consecutive
+ *   observed frames before it is reported. This does not depend on time, so it works with any
+ *   timeout and frame rate.
+ * - **Presence is measured in time.** Once reported, a key is reported again only after it has
+ *   been absent for longer than `timeoutMs`, so missed frames never cause duplicate reports.
  */
 export class PresenceTracker {
   readonly #timeoutMs: number;
   readonly #clock: Clock;
   readonly #minSightings: number;
-  readonly #presences = new Map<string, Presence>();
+  /** Reported keys and when they were last seen. */
+  readonly #present = new Map<string, number>();
+  /** For each key seen in the previous frame: how many consecutive frames it has been seen in. */
+  #streaks = new Map<string, number>();
 
   /**
-   * @param timeoutMs Absence after which a key counts as gone.
+   * @param timeoutMs Absence after which a reported key counts as gone.
    * @param clock Defaults to a monotonic clock, so system time changes cannot skew timeouts.
-   * @param minSightings Frames a key must be seen in before it is reported. Default `1`.
+   * @param minSightings Consecutive frames a key must be seen in before it is reported. Default `1`.
    */
   constructor(timeoutMs: number, clock: Clock = monotonicClock, minSightings = 1) {
     this.#timeoutMs = validateNumberOption('presenceTimeoutMs', timeoutMs);
@@ -34,29 +33,29 @@ export class PresenceTracker {
   /** Records the keys seen in one frame and returns those that just appeared. */
   observe(keys: Iterable<string>): string[] {
     const now = this.#clock();
-    for (const [key, presence] of this.#presences) {
-      if (now - presence.lastSeenAt > this.#timeoutMs) this.#presences.delete(key);
+    for (const [key, lastSeenAt] of this.#present) {
+      if (now - lastSeenAt > this.#timeoutMs) this.#present.delete(key);
     }
 
+    const streaks = new Map<string, number>();
     const appeared: string[] = [];
     for (const key of new Set(keys)) {
-      const presence = this.#presences.get(key) ?? {
-        lastSeenAt: now,
-        sightings: 0,
-        reported: false,
-      };
-      presence.lastSeenAt = now;
-      presence.sightings++;
-      if (!presence.reported && presence.sightings >= this.#minSightings) {
-        presence.reported = true;
+      const streak = (this.#streaks.get(key) ?? 0) + 1;
+      streaks.set(key, streak);
+      if (this.#present.has(key)) {
+        this.#present.set(key, now);
+      } else if (streak >= this.#minSightings) {
+        this.#present.set(key, now);
         appeared.push(key);
       }
-      this.#presences.set(key, presence);
     }
+    // Keys missing from this frame lose their streak.
+    this.#streaks = streaks;
     return appeared;
   }
 
   reset(): void {
-    this.#presences.clear();
+    this.#present.clear();
+    this.#streaks = new Map();
   }
 }

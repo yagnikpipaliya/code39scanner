@@ -171,6 +171,20 @@ describe('Code39ImageDecoder', () => {
     expect(decoder(6).decode(shortBarcode(), { linePhase: 0.1 })).toBeNull();
   });
 
+  it('confirms same-text labels of different sizes independently, each at its own spacing', () => {
+    // The large label (6px modules → 18px spacing) is only 3 rows tall and is crossed first (it
+    // sits at the image center), so it can never confirm. The small label (2px modules → 6px
+    // spacing, 15 rows tall) confirms on its own; its lines must not be judged at 18px.
+    const large = renderBarcode('DUP', { narrow: 6, height: 3, barHeight: 1 });
+    const small = renderBarcode('DUP', { narrow: 2, height: 15, barHeight: 1 });
+    const image = composeImages(large.width, 240, [
+      { image: large, x: 0, y: 114 },
+      { image: small, x: 0, y: 180 },
+    ]);
+    const texts = new Code39ImageDecoder(HORIZONTAL_ONLY).decodeAll(image).map((r) => r.text);
+    expect(texts).toEqual(['DUP']);
+  });
+
   it('finds two barcodes stacked vertically', () => {
     const top = renderBarcode('TOP', { narrow: 2, height: 60, barHeight: 0.9 });
     const bottom = renderBarcode('BOTTOM', { narrow: 2, height: 60, barHeight: 0.9 });

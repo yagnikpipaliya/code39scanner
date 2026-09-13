@@ -20,14 +20,10 @@ import {
  */
 export type Runs = ArrayLike<number>;
 
-/** A symbol found on a scanline, with its geometry along the line (in run units, i.e. pixels). */
+/** A symbol found on a scanline. */
 export interface LineSymbol {
   readonly barcode: DecodedBarcode;
-  /** Distance from the start of the line to the symbol's first bar. */
-  readonly offset: number;
-  /** Extent from the first bar of the start character to the last bar of the stop character. */
-  readonly length: number;
-  /** Mean narrow-element width: the symbol's module size. */
+  /** Mean narrow-element width: the symbol's module size, in run units (pixels). */
   readonly moduleWidth: number;
 }
 
@@ -55,16 +51,9 @@ interface CharacterMatch {
   readonly narrow: number;
 }
 
-interface SymbolMatch {
-  readonly barcode: DecodedBarcode;
+interface SymbolMatch extends LineSymbol {
   /** Index of the symbol's trailing quiet zone (which may lead into the next symbol). */
   readonly end: number;
-  readonly moduleWidth: number;
-}
-
-interface ReadingDirection {
-  readonly runs: Runs;
-  readonly reversed: boolean;
 }
 
 /**
@@ -114,27 +103,10 @@ export function matchCharacter(runs: Runs, offset: number): CharacterMatch | nul
 const isWidthConsistent = (current: CharacterMatch, previous: CharacterMatch): boolean =>
   Math.abs(current.width - previous.width) <= previous.width * MAX_CHARACTER_WIDTH_CHANGE;
 
-function sumRuns(runs: Runs, from: number, to: number): number {
-  let sum = 0;
-  for (let i = from; i < to; i++) sum += runs[i]!;
-  return sum;
-}
-
 /** The runs as read left-to-right, then reversed (restores the order of an upside-down symbol). */
-function* readingDirections(runs: Runs): Generator<ReadingDirection> {
-  yield { runs, reversed: false };
-  yield { runs: Array.from(runs).reverse(), reversed: true };
-}
-
-/** Locates a match on the original (unreversed) line. */
-function toLineSymbol(
-  { runs, reversed }: ReadingDirection,
-  start: number,
-  { barcode, end, moduleWidth }: SymbolMatch,
-): LineSymbol {
-  const length = sumRuns(runs, start, end);
-  const offset = reversed ? sumRuns(runs, end, runs.length) : sumRuns(runs, 0, start);
-  return { barcode, offset, length, moduleWidth };
+function* readingDirections(runs: Runs): Generator<Runs> {
+  yield runs;
+  yield Array.from(runs).reverse();
 }
 
 /**
@@ -157,24 +129,22 @@ export class Code39WidthDecoder {
     return this.#collect(runs, false).map((symbol) => symbol.barcode);
   }
 
-  /** Every distinct symbol on the scanline, with its geometry along the line. */
+  /** Every distinct symbol on the scanline, with its module size. */
   decodeSymbols(runs: Runs): LineSymbol[] {
     return this.#collect(runs, false);
   }
 
   #collect(runs: Runs, stopAtFirst: boolean): LineSymbol[] {
     const found = new Map<string, LineSymbol>();
-    for (const direction of readingDirections(runs)) {
-      const directed = direction.runs;
+    for (const directed of readingDirections(runs)) {
       for (let start = 1; start + ELEMENTS_PER_CHARACTER < directed.length; start += 2) {
         const match = this.#decodeAt(directed, start);
         if (!match) continue;
-        if (!found.has(match.barcode.rawText)) {
-          found.set(match.barcode.rawText, toLineSymbol(direction, start, match));
-        }
+        const { barcode, moduleWidth, end } = match;
+        if (!found.has(barcode.rawText)) found.set(barcode.rawText, { barcode, moduleWidth });
         if (stopAtFirst) return [...found.values()];
         // Resume at the first bar after this symbol; its quiet zone may lead the next symbol.
-        start = match.end - 1;
+        start = end - 1;
       }
     }
     return [...found.values()];

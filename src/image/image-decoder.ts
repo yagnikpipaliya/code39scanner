@@ -52,31 +52,37 @@ function countIndependent(positions: readonly number[], spacing: number): number
   return count;
 }
 
-/** Tracks the scanlines supporting each decoded value and how many of them are independent. */
+/**
+ * Tracks the scanlines supporting each decoded value and how many of them are independent.
+ *
+ * Support is grouped by value *and* confirmation spacing (i.e. symbol size), so two labels with
+ * the same text but different sizes are confirmed independently, each at its own spacing.
+ */
 class ConfirmationLedger {
-  readonly #entries = new Map<
-    string,
-    { readonly spacing: number; readonly lines: Map<ScanOrientation, Set<number>> }
-  >();
+  /** `${spacing}:${rawText}` → orientation → supporting line positions. */
+  readonly #groups = new Map<string, Map<ScanOrientation, Set<number>>>();
 
   /** Records a supporting line; returns the number of mutually independent supporting lines. */
   add(rawText: string, spacing: number, orientation: ScanOrientation, position: number): number {
-    let entry = this.#entries.get(rawText);
-    if (!entry) {
-      entry = { spacing, lines: new Map() };
-      this.#entries.set(rawText, entry);
+    const key = `${spacing}:${rawText}`;
+    let lines = this.#groups.get(key);
+    if (!lines) {
+      lines = new Map();
+      this.#groups.set(key, lines);
     }
-    let positions = entry.lines.get(orientation);
+    let positions = lines.get(orientation);
     if (!positions) {
       positions = new Set();
-      entry.lines.set(orientation, positions);
+      lines.set(orientation, positions);
     }
     positions.add(position);
 
     let independent = 0;
-    for (const linePositions of entry.lines.values()) {
-      const sorted = [...linePositions].sort((a, b) => a - b);
-      independent += countIndependent(sorted, entry.spacing);
+    for (const linePositions of lines.values()) {
+      independent += countIndependent(
+        [...linePositions].sort((a, b) => a - b),
+        spacing,
+      );
     }
     return independent;
   }

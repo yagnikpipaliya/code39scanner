@@ -15,12 +15,18 @@ import {
 import { luminanceFromRgba, type LuminanceSource } from '../src/image/luminance.js';
 import { BarcodeFormat, type RgbaImage, type ScanResult } from '../src/types.js';
 import { deferred, type Deferred } from './helpers/deferred.js';
-import { renderBarcode } from './helpers/encode.js';
+import { composeImages, renderBarcode } from './helpers/encode.js';
 
 const BARCODE = renderBarcode('SCAN-1', { narrow: 2 });
 const OTHER = renderBarcode('SCAN-2', { narrow: 2 });
 /** 30px tall (rows 525–554 of 1080): between the default scanlines at their initial phase. */
 const SHORT = renderBarcode('SMALL', { narrow: 2, height: 1080, barHeight: 30 / 1080 });
+const LEFT = renderBarcode('LEFT', { narrow: 2, height: 80 });
+const RIGHT = renderBarcode('RIGHT', { narrow: 2, height: 80 });
+const TWO_BARCODES = composeImages(LEFT.width + RIGHT.width, 80, [
+  { image: LEFT, x: 0, y: 0 },
+  { image: RIGHT, x: LEFT.width, y: 0 },
+]);
 const BLANK: RgbaImage = {
   width: 100,
   height: 50,
@@ -74,7 +80,7 @@ class FakeFrameSource implements FrameSource {
   }
 }
 
-function setup(options: { minFrameConfirmations?: number } = {}) {
+function setup(options: { minFrameConfirmations?: number; presenceTimeoutMs?: number } = {}) {
   const source = new FakeFrameSource();
   const scanner = new Code39Scanner({ frameSource: source, scanIntervalMs: 100, ...options });
   const detections: ScanResult[] = [];
@@ -161,6 +167,14 @@ describe('Code39Scanner', () => {
     expect(detections.map((d) => d.text)).toEqual(['SCAN-1']);
   });
 
+  it('keeps detecting with any presence timeout, even 0', async () => {
+    const { source, scanner, detections } = setup({ presenceTimeoutMs: 0 });
+    source.frame = BARCODE;
+    await scanner.start();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(detections.length).toBeGreaterThan(0);
+  });
+
   it('does not re-emit across short detection gaps', async () => {
     const { source, scanner, detections } = setup();
     source.frame = BARCODE;
@@ -198,6 +212,16 @@ describe('Code39Scanner', () => {
     await vi.advanceTimersByTimeAsync(1000);
     expect(errors).toHaveLength(0);
     expect(scanner.state).toBe(ScannerState.Scanning);
+  });
+
+  it('emits nothing more once a detect listener stops the scanner mid-frame', async () => {
+    const { source, scanner, detections } = setup({ minFrameConfirmations: 1 });
+    source.frame = TWO_BARCODES;
+    scanner.on(ScannerEvent.Detect, () => void scanner.stop());
+    await scanner.start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(detections.map((d) => d.text)).toEqual(['LEFT']);
+    expect(scanner.state).toBe(ScannerState.Idle);
   });
 
   it('stops scanning and releases the source', async () => {

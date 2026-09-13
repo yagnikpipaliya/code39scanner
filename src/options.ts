@@ -42,9 +42,9 @@ export interface ScannerOptions extends ImageDecodeOptions {
   /** A barcode is reported again only after being out of view this long, in ms. Default `1500`. */
   readonly presenceTimeoutMs?: number;
   /**
-   * Frames that must decode a value before it is reported, each within `presenceTimeoutMs` of
-   * the previous one. Default `2`: frames carry independent sensor noise and differently placed
-   * scanlines, so a misread in a single frame is never reported. `1` reports on first sight.
+   * Consecutive frames that must decode a value before it is reported. Default `2`: frames carry
+   * independent sensor noise and differently placed scanlines, so a misread in a single frame is
+   * never reported. `1` reports on first sight. Independent of `presenceTimeoutMs`.
    */
   readonly minFrameConfirmations?: number;
   /**

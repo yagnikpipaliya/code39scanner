@@ -81,22 +81,33 @@ describe('PresenceTracker with minSightings', () => {
     expect(tracker.observe(['A'])).toEqual([]);
   });
 
-  it('tolerates missed frames between sightings', () => {
-    const { tracker, advance } = setupConfirming(2);
-    tracker.observe(['A']);
-    advance(500);
-    tracker.observe([]);
-    advance(400);
+  it('requires the sightings to be in consecutive frames', () => {
+    const { tracker } = setupConfirming(2);
+    expect(tracker.observe(['A'])).toEqual([]);
+    expect(tracker.observe([])).toEqual([]);
+    expect(tracker.observe(['A'])).toEqual([]);
     expect(tracker.observe(['A'])).toEqual(['A']);
   });
 
-  it('forgets a sighting that is not repeated in time', () => {
-    const { tracker, advance } = setupConfirming(2);
-    tracker.observe(['A']);
-    advance(1001);
+  it('confirms regardless of the timeout, even 0', () => {
+    // Timeout 0 keeps no presence memory, so a confirmed key is reported on every frame.
+    const { tracker, advance } = setupConfirming(2, 0);
     expect(tracker.observe(['A'])).toEqual([]);
     advance(100);
     expect(tracker.observe(['A'])).toEqual(['A']);
+    advance(100);
+    expect(tracker.observe(['A'])).toEqual(['A']);
+  });
+
+  it('keeps a reported key present across missed frames', () => {
+    const { tracker, advance } = setupConfirming(2);
+    tracker.observe(['A']);
+    advance(100);
+    expect(tracker.observe(['A'])).toEqual(['A']);
+    advance(100);
+    tracker.observe([]);
+    advance(100);
+    expect(tracker.observe(['A'])).toEqual([]);
   });
 
   it('counts a key once per frame', () => {

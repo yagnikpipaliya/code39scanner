@@ -288,7 +288,10 @@ export class Code39Scanner {
     const results = this.#decoder.decodeAll(frame, { linePhase });
     const appeared = new Set(this.#tracker.observe(results.map((result) => result.rawText)));
     const timestamp = Date.now();
+    const generation = this.#generation;
     for (const result of results) {
+      // A listener may have stopped or disposed the scanner; nothing is emitted after that.
+      if (generation !== this.#generation) return;
       if (appeared.has(result.rawText)) {
         this.#events.emit(ScannerEvent.Detect, { ...result, timestamp });
       }
