@@ -16,6 +16,8 @@ export default tseslint.config(
       eqeqeq: ['error', 'always'],
       'no-console': ['warn', { allow: ['warn', 'error'] }],
       '@typescript-eslint/consistent-type-imports': 'error',
+      // `noUncheckedIndexedAccess` is on; indexed reads in bounds-checked numeric loops use `!`.
+      '@typescript-eslint/no-non-null-assertion': 'off',
     },
   },
   {
