@@ -10,6 +10,7 @@
     "camera",
     "decoder"
   ],
+  "homepage": "https://code39scanner.vercel.app/",
   "license": "MIT",
   "type": "module",
   "main": "./dist/index.js",

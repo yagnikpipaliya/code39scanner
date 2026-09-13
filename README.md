@@ -14,7 +14,8 @@ as it comes into view. The decoding pipeline is also usable on its own for any i
   a paused loop in background tabs, and typed errors for every failure mode.
 - Fully typed (`.d.ts`), tree-shakeable (`sideEffects: false`), unit tested.
 
-**Live demo:** deploy with the steps in [Deploying to Vercel](#deploying-to-vercel).
+**Live demo:** [code39scanner.vercel.app](https://code39scanner.vercel.app/) (open it on a phone
+to use the rear camera).
 
 ---
 
