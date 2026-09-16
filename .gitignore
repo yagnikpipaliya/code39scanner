@@ -4,3 +4,7 @@ node_modules/
 *.tgz
 .DS_Store
 task.txt
+dist/
+dist-demo/
+public/
+.kilo/

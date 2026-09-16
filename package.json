@@ -29,6 +29,7 @@
     "node": "^20.19.0 || >=22.12.0"
   },
   "scripts": {
+    "build": "echo \"No build needed - pure ES Modules\"",
     "start": "npx serve .",
     "test": "node test/manual-test.js"
   }
