@@ -31,6 +31,10 @@
   "scripts": {
     "build": "echo \"No build needed - pure ES Modules\"",
     "start": "npx serve .",
-    "test": "node test/manual-test.js"
+    "test": "node test/manual-test.js",
+    "e2e": "node test/e2e-camera.cjs"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0"
   }
 }
