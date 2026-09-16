@@ -8,9 +8,9 @@ import {
   ErrorCode,
   ScannerEvent,
   ScannerState,
-} from 'code39-scanner';
-import { ResultsStore } from '@demo/results-store.js';
-import { CameraControls, requireElement, ResultsList, StatusBanner, StatusTone } from '@demo/ui.js';
+} from '../src/index.js';
+import { ResultsStore } from './results-store.js';
+import { CameraControls, requireElement, ResultsList, StatusBanner, StatusTone } from './ui.js';
 
 const DETECTED_HIGHLIGHT_MS = 400;
 const TRANSIENT_MESSAGE_MS = 4000;

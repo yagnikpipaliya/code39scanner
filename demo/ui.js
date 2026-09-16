@@ -6,7 +6,7 @@
  * @typedef {import('code39-scanner').CameraDevice} CameraDevice
  * @typedef {import('@demo/results-store.js').StoredResult} StoredResult
  */
-import { ScannerState } from 'code39-scanner';
+import { ScannerState } from '../src/index.js';
 
 /**
  * Returns the first element matching `selector`, verifying its type at runtime (not just casting).

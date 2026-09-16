@@ -1,7 +1,4 @@
 node_modules/
-dist/
-dist-demo/
-coverage/
 .vercel/
 *.log
 *.tgz

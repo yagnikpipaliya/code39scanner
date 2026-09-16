@@ -1,7 +1,7 @@
 {
   "name": "code39-scanner",
   "version": "1.0.0",
-  "description": "Zero-dependency Code 39 barcode scanner for the browser (camera + image decoding), written in TypeScript.",
+  "description": "Zero-dependency Code 39 barcode scanner for the browser (camera + image decoding), written in JavaScript.",
   "keywords": [
     "barcode",
     "code39",
@@ -13,50 +13,23 @@
   "homepage": "https://code39scanner.vercel.app/",
   "license": "MIT",
   "type": "module",
-  "main": "./dist/index.js",
-  "module": "./dist/index.js",
-  "types": "./dist/index.d.ts",
+  "main": "./src/index.js",
+  "module": "./src/index.js",
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
+      "import": "./src/index.js"
     },
     "./package.json": "./package.json"
   },
   "files": [
-    "dist"
+    "src"
   ],
   "sideEffects": false,
   "engines": {
     "node": "^20.19.0 || >=22.12.0"
   },
   "scripts": {
-    "prepare": "npm run build:lib",
-    "clean": "node -e \"for (const d of ['dist','dist-demo','coverage']) require('fs').rmSync(d,{recursive:true,force:true})\"",
-    "build": "npm run clean && npm run build:lib && npm run build:demo",
-    "build:lib": "tsc -p tsconfig.build.json && tsc-alias -p tsconfig.build.json",
-    "build:demo": "vite build",
-    "dev": "vite",
-    "preview": "vite preview",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
-    "lint": "eslint .",
-    "format": "prettier --write .",
-    "format:check": "prettier --check ."
-  },
-  "devDependencies": {
-    "@eslint/js": "^10.0.1",
-    "@types/node": "^22.20.2",
-    "@vitest/coverage-v8": "^5.0.0",
-    "eslint": "^10.10.0",
-    "globals": "^17.12.0",
-    "prettier": "^3.9.6",
-    "tsc-alias": "^1.9.5",
-    "typescript": "^6.0.3",
-    "typescript-eslint": "^8.70.0",
-    "vite": "^8.3.0",
-    "vitest": "^5.0.0"
+    "start": "npx serve .",
+    "test": "node test/manual-test.js"
   }
 }
