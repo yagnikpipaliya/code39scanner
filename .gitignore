@@ -1,9 +1,6 @@
 node_modules/
-dist/
-coverage/
 .vercel/
 *.log
-*.tgz
 .DS_Store
 task.txt
 

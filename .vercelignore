@@ -1,0 +1,6 @@
+# Deploy only what the page loads; everything else in the repository stays out of the site.
+/*
+!/index.html
+!/demo
+!/src
+!/vercel.json

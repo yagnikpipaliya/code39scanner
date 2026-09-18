@@ -17,7 +17,7 @@ browser.
 | Symbology            | Code 39 (43 characters) and optional Full ASCII (all 128 characters)     |
 | Inputs               | Live camera stream, or any still image (RGBA or grayscale)               |
 | Hosting              | Static site on Vercel; the library is packaged as an npm-ready module    |
-| Dev dependencies     | None. Building and serving use only Node.js built-ins.                   |
+| Dev dependencies     | None. No build tools, no install step.                                   |
 
 ## Features
 
@@ -175,7 +175,6 @@ flowchart TD
 | src (root files) | Shared types, options and validation, typed errors, the event emitter, small helpers |
 | index.html       | The demo page markup, with the import map that points the package name at src       |
 | demo             | The website: styles, composition root, view components and scan history              |
-| scripts          | Zero-dependency build and local static server (Node.js built-ins only)               |
 
 **Imports.** Modules use relative imports, so the same files run unchanged in the browser and in
 Node.js, and editors can follow them with Ctrl+Click without any configuration. The demo page
@@ -246,24 +245,26 @@ requirement is a video element for the preview, or a custom frame source instead
 ## Development
 
 The package is not published to npm yet. It can be installed straight from the GitHub
-repository. There is nothing to compile: the source files are the package, and it has no
-dependencies of any kind.
+repository. There is nothing to compile or install: the source files are the package, and it
+has no dependencies of any kind.
 
-| Script  | Purpose                                                               |
-| ------- | --------------------------------------------------------------------- |
-| start   | Serves the demo from the repository at localhost:5173                 |
-| build   | Copies the page, the demo and the library sources into dist           |
-| preview | Builds, then serves the dist folder at localhost:4173                 |
+To run the demo locally, serve the repository folder with any static web server and open
+index.html. Browsers do not load JavaScript modules from file:// pages, so a server is needed.
+Some examples:
 
-Only Node.js is needed to run the scripts. Mobile browsers block the camera on plain-HTTP network
-addresses, so to test on a phone during development, serve the page over HTTPS, for example
-through a tunnel.
+- `npx serve .`
+- `python -m http.server 5173`
+- the Live Server extension in VS Code
+
+Mobile browsers block the camera on plain-HTTP network addresses, so to test on a phone during
+development, serve the page over HTTPS, for example through a tunnel.
 
 ## Deployment
 
 The demo is deployed on Vercel at
-[code39scanner.vercel.app](https://code39scanner.vercel.app/). The Vercel configuration runs the
-build script, which assembles the static site, and publishes the dist folder.
+[code39scanner.vercel.app](https://code39scanner.vercel.app/). There is no build step: Vercel serves
+the repository as a static site, and .vercelignore limits the deployment to the files the page
+loads (index.html, demo and src).
 Every page is served with these security headers:
 
 | Header                 | Value                                                          |
