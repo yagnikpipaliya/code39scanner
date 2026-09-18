@@ -6,21 +6,27 @@ import {
   InvalidArgumentError,
   InvalidOptionsError,
   OperationCancelledError,
-} from '@/errors.js';
-import { TypedEventEmitter, type Listener } from '@/events.js';
-import { Code39ImageDecoder } from '@/image/image-decoder.js';
-import { resolveScannerOptions, type ScannerOptions } from '@/options.js';
-import type { FrameSource, ScanResult, StartOptions } from '@/types.js';
-import { defineEnum, monotonicClock, type EnumValue } from '@/utils.js';
-import { CameraFrameSource, type CameraDevice } from '@/camera/camera-frame-source.js';
-import { PresenceTracker } from '@/camera/presence-tracker.js';
+} from '../errors.js';
+import { TypedEventEmitter } from '../events.js';
+import { Code39ImageDecoder } from '../image/image-decoder.js';
+import { resolveScannerOptions } from '../options.js';
+import { defineEnum, monotonicClock } from '../utils.js';
+import { CameraFrameSource } from './camera-frame-source.js';
+import { PresenceTracker } from './presence-tracker.js';
+
+/**
+ * @typedef {import('../types.js').FrameSource} FrameSource
+ * @typedef {import('../types.js').ScanResult} ScanResult
+ * @typedef {import('../types.js').StartOptions} StartOptions
+ * @typedef {import('./camera-frame-source.js').CameraDevice} CameraDevice
+ */
 
 export const ScannerState = defineEnum({
   Idle: 'idle',
   Starting: 'starting',
   Scanning: 'scanning',
 });
-export type ScannerState = EnumValue<typeof ScannerState>;
+/** @typedef {import('../utils.js').EnumValue<typeof ScannerState>} ScannerStateValue */
 
 export const ScannerEvent = defineEnum({
   /** A barcode came into view. */
@@ -29,20 +35,26 @@ export const ScannerEvent = defineEnum({
   Error: 'error',
   StateChange: 'statechange',
 });
-export type ScannerEvent = EnumValue<typeof ScannerEvent>;
 
-export interface ScannerEventMap {
-  [ScannerEvent.Detect]: ScanResult;
-  [ScannerEvent.Error]: Code39ScannerError;
-  [ScannerEvent.StateChange]: ScannerState;
-}
+/**
+ * Payload of each event: `detect` → {@link ScanResult}, `error` → `Code39ScannerError`,
+ * `statechange` → a {@link ScannerState} value.
+ * @typedef {{
+ *   detect: ScanResult,
+ *   error: Code39ScannerError,
+ *   statechange: ScannerStateValue,
+ * }} ScannerEventMap
+ */
 
-export interface Code39ScannerOptions extends ScannerOptions {
-  /** Element that shows the camera preview. Required unless `frameSource` is given. */
-  readonly video?: HTMLVideoElement;
-  /** Custom frame provider; replaces the built-in camera source. */
-  readonly frameSource?: FrameSource;
-}
+/**
+ * Scanner options plus
+ * - `video`: element that shows the camera preview. Required unless `frameSource` is given.
+ * - `frameSource`: custom frame provider; replaces the built-in camera source.
+ * @typedef {import('../options.js').ScannerOptions & {
+ *   video?: HTMLVideoElement,
+ *   frameSource?: FrameSource,
+ * }} Code39ScannerOptions
+ */
 
 /**
  * Step between the scanline phases of successive frames. The golden-ratio sequence never
@@ -61,7 +73,7 @@ const MAX_CONSECUTIVE_FRAME_FAILURES = 5;
  * Errors that retrying the next frame cannot fix: missing browser support, a lost camera, or a
  * frame source producing invalid frames.
  */
-const FATAL_ERROR_CODES: ReadonlySet<ErrorCode> = new Set([
+const FATAL_ERROR_CODES = new Set([
   ErrorCode.UnsupportedBrowser,
   ErrorCode.InsecureContext,
   ErrorCode.PermissionDenied,
@@ -70,16 +82,20 @@ const FATAL_ERROR_CODES: ReadonlySet<ErrorCode> = new Set([
   ErrorCode.InvalidOptions,
 ]);
 
-/** Every emitted error is a package error with a stable `code`; the original is kept as `cause`. */
-const toScannerError = (error: unknown): Code39ScannerError =>
+/**
+ * Every emitted error is a package error with a stable `code`; the original is kept as `cause`.
+ * @param {unknown} error
+ * @returns {Code39ScannerError}
+ */
+const toScannerError = (error) =>
   error instanceof Code39ScannerError
     ? error
     : new FrameProcessingError('Failed to process a camera frame.', { cause: error });
 
-const cancelledStart = (cause?: unknown) =>
-  OperationCancelledError.superseded('Scanner start', cause);
+/** @param {unknown} [cause] */
+const cancelledStart = (cause) => OperationCancelledError.superseded('Scanner start', cause);
 
-const isDocumentHidden = (): boolean =>
+const isDocumentHidden = () =>
   typeof document !== 'undefined' && document.visibilityState === 'hidden';
 
 /**
@@ -93,29 +109,41 @@ const isDocumentHidden = (): boolean =>
  * whatever it acquires later is released at once.
  */
 export class Code39Scanner {
-  /** Whether the browser offers everything camera scanning needs. */
-  static isSupported(): boolean {
+  /**
+   * Whether the browser offers everything camera scanning needs.
+   * @returns {boolean}
+   */
+  static isSupported() {
     return CameraFrameSource.isSupported();
   }
 
-  static listCameras(): Promise<CameraDevice[]> {
+  /** @returns {Promise<CameraDevice[]>} */
+  static listCameras() {
     return CameraFrameSource.listCameras();
   }
 
-  readonly #events = new TypedEventEmitter<ScannerEventMap>();
-  readonly #source: FrameSource;
-  readonly #decoder: Code39ImageDecoder;
-  readonly #tracker: PresenceTracker;
-  readonly #scanIntervalMs: number;
-  #state: ScannerState = ScannerState.Idle;
-  #timer: ReturnType<typeof setTimeout> | undefined;
-  #queue: Promise<unknown> = Promise.resolve();
+  #events = new TypedEventEmitter();
+  /** @type {FrameSource} */
+  #source;
+  /** @type {Code39ImageDecoder} */
+  #decoder;
+  /** @type {PresenceTracker} */
+  #tracker;
+  /** @type {number} */
+  #scanIntervalMs;
+  /** @type {ScannerStateValue} */
+  #state = ScannerState.Idle;
+  /** @type {ReturnType<typeof setTimeout> | undefined} */
+  #timer;
+  /** @type {Promise<unknown>} */
+  #queue = Promise.resolve();
   /** Incremented by `stop()`; a `start()` that observes a change was cancelled. */
   #generation = 0;
   #linePhase = INITIAL_LINE_PHASE;
   #consecutiveFailures = 0;
 
-  constructor(options: Code39ScannerOptions) {
+  /** @param {Code39ScannerOptions} options */
+  constructor(options) {
     const { video, frameSource, ...scannerOptions } = options ?? {};
     const resolved = resolveScannerOptions(scannerOptions);
     if (frameSource) {
@@ -134,19 +162,33 @@ export class Code39Scanner {
     this.#scanIntervalMs = resolved.scanIntervalMs;
   }
 
-  get state(): ScannerState {
+  /** @returns {ScannerStateValue} */
+  get state() {
     return this.#state;
   }
 
-  get activeDeviceId(): string | undefined {
+  /** @returns {string | undefined} */
+  get activeDeviceId() {
     return this.#source.activeDeviceId;
   }
 
-  on<K extends keyof ScannerEventMap>(type: K, listener: Listener<ScannerEventMap[K]>): () => void {
+  /**
+   * Subscribes to a {@link ScannerEvent}. Returns an unsubscribe function.
+   * @template {keyof ScannerEventMap} K
+   * @param {K} type
+   * @param {(payload: ScannerEventMap[K]) => void} listener
+   * @returns {() => void}
+   */
+  on(type, listener) {
     return this.#events.on(type, listener);
   }
 
-  off<K extends keyof ScannerEventMap>(type: K, listener: Listener<ScannerEventMap[K]>): void {
+  /**
+   * @template {keyof ScannerEventMap} K
+   * @param {K} type
+   * @param {(payload: ScannerEventMap[K]) => void} listener
+   */
+  off(type, listener) {
     this.#events.off(type, listener);
   }
 
@@ -154,8 +196,10 @@ export class Code39Scanner {
    * Starts scanning. If already scanning, restarts only when a different `deviceId` is requested.
    * Rejects with a typed error (`PermissionDeniedError`, `CameraUnavailableError`, …), or with
    * `OperationCancelledError` if `stop()`/`dispose()` is called before it completes.
+   * @param {StartOptions} [options]
+   * @returns {Promise<void>}
    */
-  start(options: StartOptions = {}): Promise<void> {
+  start(options = {}) {
     const generation = this.#generation;
     return this.#serialize(async () => {
       if (generation !== this.#generation) throw cancelledStart();
@@ -184,7 +228,11 @@ export class Code39Scanner {
     });
   }
 
-  switchCamera(deviceId: string): Promise<void> {
+  /**
+   * @param {string} deviceId
+   * @returns {Promise<void>}
+   */
+  switchCamera(deviceId) {
     if (typeof deviceId !== 'string' || deviceId === '') {
       return Promise.reject(new InvalidArgumentError('"deviceId" must be a non-empty string.'));
     }
@@ -193,23 +241,27 @@ export class Code39Scanner {
 
   /**
    * Stops scanning and releases the camera. Takes effect immediately, including on a pending
-   * `start()` (which then rejects with `OperationCancelledError`).
+   * `start()`: the state becomes idle at once, and the pending call rejects with
+   * `OperationCancelledError` when it settles, without ever resuming scanning.
+   * @returns {Promise<void>}
    */
-  stop(): Promise<void> {
+  stop() {
+    // Invalidates every pending or queued start(); each checks the generation before scanning.
     this.#generation++;
-    this.#cancelTick();
-    // Releasing the source invalidates an in-flight camera request. A permission prompt that is
+    // Not queued behind a pending start(), which may wait indefinitely (e.g. on a permission
+    // prompt). Releasing the source also cancels its in-flight camera request: a prompt that is
     // already open cannot be closed by the page, but a stream it grants later is released at once.
-    this.#source.stop();
-    return this.#serialize(async () => this.#halt());
+    this.#halt();
+    return Promise.resolve();
   }
 
   /**
    * Stops scanning, then detaches all listeners. Listeners receive the final
    * `StateChange → idle`; no `Detect` can follow, because `stop()` cancels a pending start
    * synchronously.
+   * @returns {Promise<void>}
    */
-  async dispose(): Promise<void> {
+  async dispose() {
     try {
       await this.stop();
     } finally {
@@ -217,41 +269,51 @@ export class Code39Scanner {
     }
   }
 
-  #serialize(task: () => Promise<void>): Promise<void> {
+  /**
+   * @template T
+   * @param {() => Promise<T>} task
+   * @returns {Promise<T>}
+   */
+  #serialize(task) {
     const run = this.#queue.then(task, task);
     this.#queue = run.catch(() => undefined);
     return run;
   }
 
-  #halt(): void {
+  #halt() {
     this.#cancelTick();
     this.#source.stop();
     this.#tracker.reset();
     this.#setState(ScannerState.Idle);
   }
 
-  /** Stops scanning because of an unrecoverable error, then reports it. */
-  #fail(error: Code39ScannerError): void {
+  /**
+   * Stops scanning because of an unrecoverable error, then reports it.
+   * @param {Code39ScannerError} error
+   */
+  #fail(error) {
     this.#halt();
     this.#reportError(error);
   }
 
-  #setState(state: ScannerState): void {
+  /** @param {ScannerStateValue} state */
+  #setState(state) {
     if (this.#state === state) return;
     this.#state = state;
     this.#events.emit(ScannerEvent.StateChange, state);
   }
 
-  #scheduleTick(delayMs: number): void {
+  /** @param {number} delayMs */
+  #scheduleTick(delayMs) {
     this.#timer = setTimeout(() => this.#tick(), delayMs);
   }
 
-  #cancelTick(): void {
+  #cancelTick() {
     clearTimeout(this.#timer);
     this.#timer = undefined;
   }
 
-  #tick(): void {
+  #tick() {
     this.#timer = undefined;
     if (this.#state !== ScannerState.Scanning) return;
 
@@ -281,8 +343,11 @@ export class Code39Scanner {
     }
   }
 
-  /** Decodes the current frame and emits detections. Returns whether a frame was processed. */
-  #scanFrame(): boolean {
+  /**
+   * Decodes the current frame and emits detections. Returns whether a frame was processed.
+   * @returns {boolean}
+   */
+  #scanFrame() {
     if (isDocumentHidden()) return false;
     const frame = this.#source.grabFrame();
     if (!frame) return false;
@@ -303,7 +368,8 @@ export class Code39Scanner {
     return true;
   }
 
-  #reportError(error: Code39ScannerError): void {
+  /** @param {Code39ScannerError} error */
+  #reportError(error) {
     if (this.#events.emit(ScannerEvent.Error, error)) return;
     // Never swallow errors silently when nobody listens.
     if (typeof reportError === 'function') reportError(error);

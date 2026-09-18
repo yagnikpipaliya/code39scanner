@@ -1,20 +1,18 @@
-import { Code39WidthDecoder, type LineSymbol } from '@/core/width-decoder.js';
-import {
-  resolveImageDecodeOptions,
-  validateNumberOption,
-  type ImageDecodeOptions,
-  type ResolvedImageDecodeOptions,
-  type ScanPassOptions,
-} from '@/options.js';
-import {
-  ScanOrientation,
-  type DecodedBarcode,
-  type ImageInput,
-  type LuminanceSource,
-} from '@/types.js';
-import { getOrInsert } from '@/utils.js';
-import { toLuminanceSource } from '@/image/luminance.js';
-import { binarizeLine } from '@/image/scanline-binarizer.js';
+import { Code39WidthDecoder } from '../core/width-decoder.js';
+import { resolveImageDecodeOptions, validateNumberOption } from '../options.js';
+import { ScanOrientation } from '../types.js';
+import { getOrInsert } from '../utils.js';
+import { toLuminanceSource } from './luminance.js';
+import { binarizeLine } from './scanline-binarizer.js';
+
+/**
+ * @typedef {import('../types.js').DecodedBarcode} DecodedBarcode
+ * @typedef {import('../types.js').ImageInput} ImageInput
+ * @typedef {import('../types.js').LuminanceSource} LuminanceSource
+ * @typedef {import('../options.js').ImageDecodeOptions} ImageDecodeOptions
+ * @typedef {import('../options.js').ScanPassOptions} ScanPassOptions
+ * @typedef {import('../core/width-decoder.js').LineSymbol} LineSymbol
+ */
 
 /** Primary lines sit in the middle of their band unless a phase is given. */
 const DEFAULT_LINE_PHASE = 0.5;
@@ -38,8 +36,14 @@ const MIN_CONFIRMATION_SPACING_MODULES = 3;
  */
 const MODULE_WIDTH_TOLERANCE = 0.25;
 
-/** Evenly spaced primary line positions across `length`, ordered from the center outwards. */
-function primaryLinePositions(count: number, length: number, phase: number): number[] {
+/**
+ * Evenly spaced primary line positions across `length`, ordered from the center outwards.
+ * @param {number} count
+ * @param {number} length
+ * @param {number} phase
+ * @returns {number[]}
+ */
+function primaryLinePositions(count, length, phase) {
   const lines = Math.min(count, length);
   const center = (length - 1) / 2;
   return Array.from({ length: lines }, (_, k) =>
@@ -47,13 +51,24 @@ function primaryLinePositions(count: number, length: number, phase: number): num
   ).sort((a, b) => Math.abs(a - center) - Math.abs(b - center));
 }
 
-/** Positions `step` apart, walking from `position` (exclusive) towards one image edge. */
-function* walkFrom(position: number, step: number, length: number): Generator<number> {
+/**
+ * Positions `step` apart, walking from `position` (exclusive) towards one image edge.
+ * @param {number} position
+ * @param {number} step
+ * @param {number} length
+ * @returns {Generator<number>}
+ */
+function* walkFrom(position, step, length) {
   for (let next = position + step; next >= 0 && next < length; next += step) yield next;
 }
 
-/** Size of the largest subset of sorted `positions` whose members are `spacing` or more apart. */
-function countIndependent(positions: readonly number[], spacing: number): number {
+/**
+ * Size of the largest subset of sorted `positions` whose members are `spacing` or more apart.
+ * @param {readonly number[]} positions
+ * @param {number} spacing
+ * @returns {number}
+ */
+function countIndependent(positions, spacing) {
   let count = 0;
   let last = -Infinity;
   for (const position of positions) {
@@ -67,22 +82,37 @@ function countIndependent(positions: readonly number[], spacing: number): number
 
 /** Scanlines supporting one value at one symbol size. */
 class SupportGroup {
-  readonly moduleWidth: number;
-  /** Minimum distance between two independent supporting lines. */
-  readonly spacing: number;
-  readonly #lines = new Map<ScanOrientation, Set<number>>();
+  /** @type {number} */
+  moduleWidth;
+  /**
+   * Minimum distance between two independent supporting lines.
+   * @type {number}
+   */
+  spacing;
+  /** @type {Map<string, Set<number>>} */
+  #lines = new Map();
 
-  constructor(moduleWidth: number) {
+  /** @param {number} moduleWidth */
+  constructor(moduleWidth) {
     this.moduleWidth = moduleWidth;
     this.spacing = Math.max(1, Math.round(moduleWidth * MIN_CONFIRMATION_SPACING_MODULES));
   }
 
-  matches(moduleWidth: number): boolean {
+  /**
+   * @param {number} moduleWidth
+   * @returns {boolean}
+   */
+  matches(moduleWidth) {
     return Math.abs(moduleWidth - this.moduleWidth) <= this.moduleWidth * MODULE_WIDTH_TOLERANCE;
   }
 
-  /** Records a supporting line; returns the number of mutually independent supporting lines. */
-  add(orientation: ScanOrientation, position: number): number {
+  /**
+   * Records a supporting line; returns the number of mutually independent supporting lines.
+   * @param {string} orientation
+   * @param {number} position
+   * @returns {number}
+   */
+  add(orientation, position) {
     getOrInsert(this.#lines, orientation, () => new Set()).add(position);
 
     let independent = 0;
@@ -98,9 +128,15 @@ class SupportGroup {
 
 /** Groups supporting scanlines by value and symbol size (see {@link MODULE_WIDTH_TOLERANCE}). */
 class ConfirmationLedger {
-  readonly #groups = new Map<string, SupportGroup[]>();
+  /** @type {Map<string, SupportGroup[]>} */
+  #groups = new Map();
 
-  groupFor(rawText: string, moduleWidth: number): SupportGroup {
+  /**
+   * @param {string} rawText
+   * @param {number} moduleWidth
+   * @returns {SupportGroup}
+   */
+  groupFor(rawText, moduleWidth) {
     const groups = getOrInsert(this.#groups, rawText, () => []);
     let group = groups.find((candidate) => candidate.matches(moduleWidth));
     if (!group) {
@@ -121,35 +157,51 @@ class ConfirmationLedger {
  * independent lines as its bars are tall.
  */
 export class Code39ImageDecoder {
-  readonly #options: ResolvedImageDecodeOptions;
-  readonly #lineDecoder: Code39WidthDecoder;
+  /** @type {import('../options.js').ResolvedImageDecodeOptions} */
+  #options;
+  /** @type {Code39WidthDecoder} */
+  #lineDecoder;
 
-  constructor(options?: ImageDecodeOptions) {
+  /** @param {ImageDecodeOptions} [options] */
+  constructor(options) {
     this.#options = resolveImageDecodeOptions(options);
     this.#lineDecoder = new Code39WidthDecoder(this.#options);
   }
 
-  /** The first confirmed barcode, or `null`. */
-  decode(input: ImageInput, pass?: ScanPassOptions): DecodedBarcode | null {
+  /**
+   * The first confirmed barcode, or `null`.
+   * @param {ImageInput} input
+   * @param {ScanPassOptions} [pass]
+   * @returns {DecodedBarcode | null}
+   */
+  decode(input, pass) {
     return this.#scan(toLuminanceSource(input), pass, true)[0] ?? null;
   }
 
-  /** All distinct confirmed barcodes. */
-  decodeAll(input: ImageInput, pass?: ScanPassOptions): DecodedBarcode[] {
+  /**
+   * All distinct confirmed barcodes.
+   * @param {ImageInput} input
+   * @param {ScanPassOptions} [pass]
+   * @returns {DecodedBarcode[]}
+   */
+  decodeAll(input, pass) {
     return this.#scan(toLuminanceSource(input), pass, false);
   }
 
-  #scan(
-    source: LuminanceSource,
-    pass: ScanPassOptions = {},
-    stopAtFirst: boolean,
-  ): DecodedBarcode[] {
+  /**
+   * @param {LuminanceSource} source
+   * @param {ScanPassOptions | undefined} pass
+   * @param {boolean} stopAtFirst
+   * @returns {DecodedBarcode[]}
+   */
+  #scan(source, pass = {}, stopAtFirst) {
     const phase = validateNumberOption('linePhase', pass.linePhase ?? DEFAULT_LINE_PHASE);
     if (source.width === 0 || source.height === 0) return [];
 
     const { orientations, scanLines, minConfirmations } = this.#options;
     const ledger = new ConfirmationLedger();
-    const confirmed = new Map<string, DecodedBarcode>();
+    /** @type {Map<string, DecodedBarcode>} */
+    const confirmed = new Map();
 
     for (const orientation of orientations) {
       const horizontal = orientation === ScanOrientation.Horizontal;
@@ -157,7 +209,11 @@ export class Code39ImageDecoder {
       const decodeLine = this.#cachedLineDecoder((position) =>
         horizontal ? source.row(position) : source.column(position),
       );
-      const decodes = (position: number, rawText: string) =>
+      /**
+       * @param {number} position
+       * @param {string} rawText
+       */
+      const decodes = (position, rawText) =>
         decodeLine(position).some((symbol) => symbol.barcode.rawText === rawText);
 
       for (const position of primaryLinePositions(scanLines, length, phase)) {
@@ -184,11 +240,14 @@ export class Code39ImageDecoder {
     return [...confirmed.values()];
   }
 
-  /** Decodes lines of one orientation, each position at most once. */
-  #cachedLineDecoder(
-    readLine: (position: number) => Uint8Array,
-  ): (position: number) => readonly LineSymbol[] {
-    const cache = new Map<number, readonly LineSymbol[]>();
+  /**
+   * Decodes lines of one orientation, each position at most once.
+   * @param {(position: number) => Uint8Array} readLine
+   * @returns {(position: number) => LineSymbol[]}
+   */
+  #cachedLineDecoder(readLine) {
+    /** @type {Map<number, LineSymbol[]>} */
+    const cache = new Map();
     return (position) => {
       let symbols = cache.get(position);
       if (!symbols) {
@@ -204,10 +263,10 @@ export class Code39ImageDecoder {
 /**
  * Convenience wrapper: decodes the first confirmed Code 39 barcode in an image.
  * Prefer a reused {@link Code39ImageDecoder} when decoding many images.
+ * @param {ImageInput} input
+ * @param {ImageDecodeOptions} [options]
+ * @returns {DecodedBarcode | null}
  */
-export function decodeImage(
-  input: ImageInput,
-  options?: ImageDecodeOptions,
-): DecodedBarcode | null {
+export function decodeImage(input, options) {
   return new Code39ImageDecoder(options).decode(input);
 }

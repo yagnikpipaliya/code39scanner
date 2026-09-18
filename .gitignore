@@ -1,9 +1,12 @@
 node_modules/
-dist/
-dist-demo/
-coverage/
 .vercel/
 *.log
-*.tgz
 .DS_Store
 task.txt
+
+# Local-only material: tests (kept out of the repo, no dev dependencies), sample documents and
+# other tools' working folders.
+tests/
+public/
+test-results/
+.kilo/

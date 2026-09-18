@@ -8,9 +8,9 @@ import {
   ErrorCode,
   ScannerEvent,
   ScannerState,
-} from 'code39-scanner';
-import { ResultsStore } from '@demo/results-store.js';
-import { CameraControls, requireElement, ResultsList, StatusBanner, StatusTone } from '@demo/ui.js';
+} from '../src/index.js';
+import { ResultsStore } from './results-store.js';
+import { CameraControls, requireElement, ResultsList, StatusBanner, StatusTone } from './ui.js';
 
 const DETECTED_HIGHLIGHT_MS = 400;
 const TRANSIENT_MESSAGE_MS = 4000;
@@ -19,7 +19,7 @@ const TRANSIENT_MESSAGE_MS = 4000;
  * User-facing explanation per error code, built from the error's own message; codes without an
  * entry show that message unchanged.
  *
- * @type {Readonly<Partial<Record<import('code39-scanner').ErrorCode, (message: string) => string>>>}
+ * @type {Readonly<Partial<Record<string, (message: string) => string>>>}
  */
 const ERROR_MESSAGES = Object.freeze({
   [ErrorCode.PermissionDenied]: () =>
@@ -33,7 +33,7 @@ const ERROR_MESSAGES = Object.freeze({
 });
 
 /**
- * @param {import('code39-scanner').ErrorCode} code
+ * @param {string} code An `ErrorCode` value.
  * @param {string} message
  * @returns {string}
  */
