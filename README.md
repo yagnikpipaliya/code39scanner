@@ -1,8 +1,8 @@
 # Code 39 Scanner
 
-A zero-dependency Code 39 barcode scanner for the browser, written in plain JavaScript. It opens the
-device camera, reads Code 39 barcodes in real time and lists the scanned values below the camera
-preview. Everything runs on the device: no server, no third-party library, no data leaves the
+A zero-dependency Code 39 barcode scanner for the browser, written in plain JavaScript. It opens
+the device camera, reads Code 39 barcodes in real time and lists the scanned values below the
+camera preview. Everything runs on the device: no server, no third-party library, no data leaves the
 browser.
 
 **Live demo:** [code39scanner.vercel.app](https://code39scanner.vercel.app/)  
@@ -182,9 +182,10 @@ maps the package name to src/index.js with an import map, so it imports the libr
 way an npm consumer would.
 
 **Design principles.** Each module has one responsibility. The scanner depends on a frame
-source abstraction rather than on the camera directly, so tests and other inputs can supply
-frames. There is one source of truth for character patterns, option defaults and valid ranges.
-Invalid input is rejected at the public boundary with a typed error.
+source abstraction rather than on the camera directly, so other inputs, such as a video file or a
+set of still images, can supply frames. There is one source of truth for character patterns,
+option defaults and valid ranges. Invalid input is rejected at the public boundary with a typed
+error.
 
 ## Configuration
 
@@ -230,12 +231,14 @@ requirement is a video element for the preview, or a custom frame source instead
 - **Secure context.** The page must be served over HTTPS or from localhost; browsers only allow
   camera access there.
 - **Browser.** Camera access and Canvas 2D, in Chrome or Edge 84+, Firefox 90+ or Safari 15+.
-- **Development only.** Node.js 20.19 or newer.
+- **Demo page.** It loads the library through an import map, which needs Chrome or Edge 89+,
+  Firefox 108+ or Safari 16.4+.
 
 ## Limitations
 
-- Narrow bars must be at least about 1.5 pixels wide in the camera frame. Move closer for small
-  or dense barcodes.
+- Narrow bars must be at least about 2 pixels wide in the camera frame (about 1.5 pixels for
+  longer barcodes). Below that, a barcode is not read at all rather than read partially. Move
+  closer for small or dense barcodes.
 - A scanline must cross the barcode from end to end, so the tilt it tolerates depends on the
   barcode's proportions. That is about 8 degrees for bars at the minimum height of 15% of the
   symbol length, and more for taller bars.
@@ -261,11 +264,10 @@ development, serve the page over HTTPS, for example through a tunnel.
 
 ## Deployment
 
-The demo is deployed on Vercel at
-[code39scanner.vercel.app](https://code39scanner.vercel.app/). There is no build step: Vercel serves
-the repository as a static site, and .vercelignore limits the deployment to the files the page
-loads (index.html, demo and src).
-Every page is served with these security headers:
+The demo is deployed on Vercel at [code39scanner.vercel.app](https://code39scanner.vercel.app/).
+There is no build step: Vercel serves the repository as a static site, and .vercelignore limits
+the deployment to the files the page loads (index.html, demo and src). Every page is served with
+these security headers:
 
 | Header                 | Value                                                          |
 | ---------------------- | -------------------------------------------------------------- |
