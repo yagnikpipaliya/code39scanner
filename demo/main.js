@@ -8,7 +8,7 @@ import {
   ErrorCode,
   ScannerEvent,
   ScannerState,
-} from 'code39-scanner';
+} from '../src/index.js';
 import { ResultsStore } from './results-store.js';
 import { CameraControls, requireElement, ResultsList, StatusBanner, StatusTone } from './ui.js';
 

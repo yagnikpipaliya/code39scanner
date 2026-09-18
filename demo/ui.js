@@ -6,7 +6,7 @@
  * @typedef {import('../src/camera/camera-frame-source.js').CameraDevice} CameraDevice
  * @typedef {import('./results-store.js').StoredResult} StoredResult
  */
-import { ScannerState } from 'code39-scanner';
+import { ScannerState } from '../src/index.js';
 
 /**
  * Returns the first element matching `selector`, verifying its type at runtime (not just casting).
@@ -99,7 +99,8 @@ export class StatusBanner {
 
 const TOGGLE_LABELS = Object.freeze({
   [ScannerState.Idle]: 'Start scanning',
-  [ScannerState.Starting]: 'Starting camera…',
+  // Stopping takes effect at once, so a start stuck on a permission prompt can be cancelled.
+  [ScannerState.Starting]: 'Cancel',
   [ScannerState.Scanning]: 'Stop scanning',
 });
 const PICKER_PLACEHOLDER = 'Start scanning to choose';
@@ -113,6 +114,8 @@ export class CameraControls {
   #select;
   /** @type {HTMLElement} */
   #viewer;
+  /** @type {ScannerStateValue} */
+  #state = ScannerState.Idle;
 
   /**
    * @param {{
@@ -135,11 +138,11 @@ export class CameraControls {
 
   /** @param {ScannerStateValue} state */
   setState(state) {
+    this.#state = state;
     this.#toggle.textContent = TOGGLE_LABELS[state];
-    this.#toggle.disabled = state === ScannerState.Starting;
     this.#toggle.setAttribute('aria-pressed', String(state === ScannerState.Scanning));
-    this.#select.disabled = state !== ScannerState.Scanning || this.#select.options.length < 2;
     this.#viewer.dataset.state = state;
+    this.#updatePicker();
   }
 
   /** @param {readonly CameraDevice[]} cameras @param {string | undefined} activeDeviceId */
@@ -168,7 +171,16 @@ export class CameraControls {
   /** @param {HTMLOptionElement[]} options */
   #showOptions(options) {
     this.#select.replaceChildren(...options);
-    this.#select.disabled = options.length < 2;
+    this.#updatePicker();
+  }
+
+  /**
+   * The one place that decides whether the picker is usable: only while scanning, and only with
+   * a real choice. The camera list can arrive after the scanner has already stopped.
+   */
+  #updatePicker() {
+    this.#select.disabled =
+      this.#state !== ScannerState.Scanning || this.#select.options.length < 2;
   }
 }
 

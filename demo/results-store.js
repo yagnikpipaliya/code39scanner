@@ -44,7 +44,18 @@ const isRecord = (value) => typeof value === 'object' && value !== null;
 const isGeneration = (value) => Number.isInteger(value) && /** @type {number} */ (value) >= 0;
 
 /**
- * A scan entry from either storage format (the generation is checked separately).
+ * Whether `value` is a time the list can display: finite and within the range of `Date`
+ * (±8.64e15 ms). Anything else would make date formatting throw.
+ *
+ * @param {unknown} value
+ * @returns {value is number}
+ */
+const isTimestamp = (value) =>
+  typeof value === 'number' && !Number.isNaN(new Date(value).getTime());
+
+/**
+ * A scan entry from either storage format (the generation is checked separately). Storage is
+ * shared with other tabs and older builds, so every field is validated before use.
  *
  * @param {unknown} value
  * @returns {value is { id: string, text: string, timestamp: number }}
@@ -54,8 +65,7 @@ function isScanEntry(value) {
     isRecord(value) &&
     typeof value.id === 'string' &&
     typeof value.text === 'string' &&
-    typeof value.timestamp === 'number' &&
-    Number.isFinite(value.timestamp)
+    isTimestamp(value.timestamp)
   );
 }
 

@@ -241,16 +241,18 @@ export class Code39Scanner {
 
   /**
    * Stops scanning and releases the camera. Takes effect immediately, including on a pending
-   * `start()` (which then rejects with `OperationCancelledError`).
+   * `start()`: the state becomes idle at once, and the pending call rejects with
+   * `OperationCancelledError` when it settles, without ever resuming scanning.
    * @returns {Promise<void>}
    */
   stop() {
+    // Invalidates every pending or queued start(); each checks the generation before scanning.
     this.#generation++;
-    this.#cancelTick();
-    // Releasing the source invalidates an in-flight camera request. A permission prompt that is
+    // Not queued behind a pending start(), which may wait indefinitely (e.g. on a permission
+    // prompt). Releasing the source also cancels its in-flight camera request: a prompt that is
     // already open cannot be closed by the page, but a stream it grants later is released at once.
-    this.#source.stop();
-    return this.#serialize(async () => this.#halt());
+    this.#halt();
+    return Promise.resolve();
   }
 
   /**

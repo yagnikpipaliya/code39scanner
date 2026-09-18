@@ -2,8 +2,8 @@
 
 A zero-dependency Code 39 barcode scanner for the browser, written in plain JavaScript. It opens
 the device camera, reads Code 39 barcodes in real time and lists the scanned values below the
-camera preview. Everything runs on the device: no server, no third-party library, no data leaves the
-browser.
+camera preview. Everything runs on the device: no server, no third-party library, no data leaves
+the browser.
 
 **Live demo:** [code39scanner.vercel.app](https://code39scanner.vercel.app/)  
 **Repository:** [github.com/yagnikpipaliya/code39scanner](https://github.com/yagnikpipaliya/code39scanner)
@@ -117,8 +117,8 @@ sequenceDiagram
     Store-->>Page: updated list, newest first
 ```
 
-- **Start and stop** with a single button. The camera is released when the page is closed or
-  hidden.
+- **Start and stop** with a single button, which also cancels a start that is still waiting for
+  camera permission. The camera is released when the page is closed or hidden.
 - **Camera picker.** It lists the available cameras once permission has been granted.
 - **Live feedback.** A "Live" badge, a scan guide with a moving laser line, and a green flash
   when a barcode is detected.
@@ -173,13 +173,12 @@ flowchart TD
 | src/image        | Luminance sources, the scanline binarizer and the whole-image decoder                |
 | src/camera       | The camera frame source, the presence tracker and the live scanner                   |
 | src (root files) | Shared types, options and validation, typed errors, the event emitter, small helpers |
-| index.html       | The demo page markup, with the import map that points the package name at src       |
+| index.html       | The demo page markup                                                                 |
 | demo             | The website: styles, composition root, view components and scan history              |
 
 **Imports.** Modules use relative imports, so the same files run unchanged in the browser and in
-Node.js, and editors can follow them with Ctrl+Click without any configuration. The demo page
-maps the package name to src/index.js with an import map, so it imports the library exactly the
-way an npm consumer would.
+Node.js, and editors can follow them with Ctrl+Click without any configuration. The demo imports
+the library only through its public entry point, src/index.js, exactly as an npm consumer would.
 
 **Design principles.** Each module has one responsibility. The scanner depends on a frame
 source abstraction rather than on the camera directly, so other inputs, such as a video file or a
@@ -231,8 +230,6 @@ requirement is a video element for the preview, or a custom frame source instead
 - **Secure context.** The page must be served over HTTPS or from localhost; browsers only allow
   camera access there.
 - **Browser.** Camera access and Canvas 2D, in Chrome or Edge 84+, Firefox 90+ or Safari 15+.
-- **Demo page.** It loads the library through an import map, which needs Chrome or Edge 89+,
-  Firefox 108+ or Safari 16.4+.
 
 ## Limitations
 
