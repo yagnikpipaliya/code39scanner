@@ -1,5 +1,5 @@
-import { FRAME_CONFIRMATION_WINDOW, validateNumberOption } from '@/options.js';
-import { getOrInsert, monotonicClock, type Clock } from '@/utils.js';
+import { FRAME_CONFIRMATION_WINDOW, validateNumberOption } from '../options.js';
+import { getOrInsert, monotonicClock } from '../utils.js';
 
 /**
  * Turns a stream of per-frame detections into discrete "appeared" events.
@@ -12,34 +12,48 @@ import { getOrInsert, monotonicClock, type Clock } from '@/utils.js';
  *   been absent for longer than `timeoutMs`, so missed frames never cause duplicate reports.
  */
 export class PresenceTracker {
-  readonly #timeoutMs: number;
-  readonly #clock: Clock;
-  readonly #minSightings: number;
-  /** Reported keys and when they were last seen. */
-  readonly #present = new Map<string, number>();
-  /** Indices of the recent frames each key was seen in, oldest first. */
-  readonly #sightings = new Map<string, number[]>();
+  /** @type {number} */
+  #timeoutMs;
+  /** @type {import('../utils.js').Clock} */
+  #clock;
+  /** @type {number} */
+  #minSightings;
+  /**
+   * Reported keys and when they were last seen.
+   * @type {Map<string, number>}
+   */
+  #present = new Map();
+  /**
+   * Indices of the recent frames each key was seen in, oldest first.
+   * @type {Map<string, number[]>}
+   */
+  #sightings = new Map();
   #frame = 0;
 
   /**
-   * @param timeoutMs Absence after which a reported key counts as gone.
-   * @param clock Defaults to a monotonic clock, so system time changes cannot skew timeouts.
-   * @param minSightings Frames, out of the last {@link FRAME_CONFIRMATION_WINDOW}, a key must be
+   * @param {number} timeoutMs Absence after which a reported key counts as gone.
+   * @param {import('../utils.js').Clock} [clock] Defaults to a monotonic clock, so system time changes cannot skew timeouts.
+   * @param {number} [minSightings] Frames, out of the last {@link FRAME_CONFIRMATION_WINDOW}, a key must be
    *   seen in before it is reported. Default `1`.
    */
-  constructor(timeoutMs: number, clock: Clock = monotonicClock, minSightings = 1) {
+  constructor(timeoutMs, clock = monotonicClock, minSightings = 1) {
     this.#timeoutMs = validateNumberOption('presenceTimeoutMs', timeoutMs);
     this.#minSightings = validateNumberOption('minFrameConfirmations', minSightings);
     this.#clock = clock;
   }
 
-  /** Records the keys seen in one frame and returns those that just appeared. */
-  observe(keys: Iterable<string>): string[] {
+  /**
+   * Records the keys seen in one frame and returns those that just appeared.
+   * @param {Iterable<string>} keys
+   * @returns {string[]}
+   */
+  observe(keys) {
     const now = this.#clock();
     const frame = ++this.#frame;
     this.#forgetStale(now, frame);
 
-    const appeared: string[] = [];
+    /** @type {string[]} */
+    const appeared = [];
     for (const key of new Set(keys)) {
       const frames = getOrInsert(this.#sightings, key, () => []);
       frames.push(frame);
@@ -53,14 +67,18 @@ export class PresenceTracker {
     return appeared;
   }
 
-  reset(): void {
+  reset() {
     this.#present.clear();
     this.#sightings.clear();
     this.#frame = 0;
   }
 
-  /** Drops presences older than the timeout and sightings outside the confirmation window. */
-  #forgetStale(now: number, frame: number): void {
+  /**
+   * Drops presences older than the timeout and sightings outside the confirmation window.
+   * @param {number} now
+   * @param {number} frame
+   */
+  #forgetStale(now, frame) {
     for (const [key, lastSeenAt] of this.#present) {
       if (now - lastSeenAt > this.#timeoutMs) {
         // The key is gone: its earlier sightings must not confirm its next appearance.

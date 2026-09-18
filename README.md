@@ -1,6 +1,6 @@
 # Code 39 Scanner
 
-A zero-dependency Code 39 barcode scanner for the browser, written in TypeScript. It opens the
+A zero-dependency Code 39 barcode scanner for the browser, written in plain JavaScript. It opens the
 device camera, reads Code 39 barcodes in real time and lists the scanned values below the camera
 preview. Everything runs on the device: no server, no third-party library, no data leaves the
 browser.
@@ -13,11 +13,11 @@ browser.
 | Item                 | Details                                                                  |
 | -------------------- | ------------------------------------------------------------------------ |
 | Runtime dependencies | None. Image processing, decoding and camera handling are all in-house.   |
-| Language             | TypeScript (strict), compiled to standard ES2022 modules with type files |
+| Language             | Plain JavaScript (ES2022 modules), documented with JSDoc; no build step  |
 | Symbology            | Code 39 (43 characters) and optional Full ASCII (all 128 characters)     |
 | Inputs               | Live camera stream, or any still image (RGBA or grayscale)               |
 | Hosting              | Static site on Vercel; the library is packaged as an npm-ready module    |
-| Quality              | 214 unit tests, per-folder coverage thresholds, ESLint and Prettier      |
+| Dev dependencies     | None. Building and serving use only Node.js built-ins.                   |
 
 ## Features
 
@@ -140,22 +140,22 @@ flowchart TD
         store["results-store.js<br/>saved history"]
     end
     subgraph Camera["src/camera — live scanning"]
-        scanner["scanner.ts"]
-        source["camera-frame-source.ts"]
-        tracker["presence-tracker.ts"]
+        scanner["scanner.js"]
+        source["camera-frame-source.js"]
+        tracker["presence-tracker.js"]
     end
     subgraph Image["src/image — image processing"]
-        decoder["image-decoder.ts"]
-        binarizer["scanline-binarizer.ts"]
-        luminance["luminance.ts"]
+        decoder["image-decoder.js"]
+        binarizer["scanline-binarizer.js"]
+        luminance["luminance.js"]
     end
     subgraph Core["src/core — symbology"]
-        width["width-decoder.ts"]
-        symbology["symbology.ts"]
+        width["width-decoder.js"]
+        symbology["symbology.js"]
     end
     main --> ui
     main --> store
-    main --> api["index.ts — public API"]
+    main --> api["index.js — public API"]
     api --> scanner
     scanner --> source
     scanner --> tracker
@@ -173,12 +173,14 @@ flowchart TD
 | src/image        | Luminance sources, the scanline binarizer and the whole-image decoder                |
 | src/camera       | The camera frame source, the presence tracker and the live scanner                   |
 | src (root files) | Shared types, options and validation, typed errors, the event emitter, small helpers |
-| demo             | The website: page markup, styles, composition root, view components and scan history |
-| tests            | Unit tests, plus a test-only Code 39 encoder and synthetic image renderer            |
+| index.html       | The demo page markup, with the import map that points the package name at src       |
+| demo             | The website: styles, composition root, view components and scan history              |
+| scripts          | Zero-dependency build and local static server (Node.js built-ins only)               |
 
-**Imports.** Imports use absolute paths from the project root: the @ prefix points to src, @demo
-to demo, and @tests to tests. Editors can follow them with Ctrl+Click. The library build rewrites
-them to relative paths, so the packaged output works anywhere without extra configuration.
+**Imports.** Modules use relative imports, so the same files run unchanged in the browser and in
+Node.js, and editors can follow them with Ctrl+Click without any configuration. The demo page
+maps the package name to src/index.js with an import map, so it imports the library exactly the
+way an npm consumer would.
 
 **Design principles.** Each module has one responsibility. The scanner depends on a frame
 source abstraction rather than on the camera directly, so tests and other inputs can supply
@@ -244,31 +246,24 @@ requirement is a video element for the preview, or a custom frame source instead
 ## Development
 
 The package is not published to npm yet. It can be installed straight from the GitHub
-repository; the install step builds the library automatically.
+repository. There is nothing to compile: the source files are the package, and it has no
+dependencies of any kind.
 
-| Script        | Purpose                                                                 |
-| ------------- | ----------------------------------------------------------------------- |
-| dev           | Runs the demo at localhost:5173 using the TypeScript sources            |
-| test          | Runs the unit tests once                                                |
-| test:watch    | Runs the unit tests in watch mode                                       |
-| test:coverage | Runs the unit tests with coverage thresholds                            |
-| typecheck     | Type-checks the library, the tests and the demo (checked through JSDoc) |
-| lint          | Runs ESLint                                                             |
-| format        | Formats all files with Prettier; format:check only verifies them        |
-| build         | Builds the library into dist, then the demo into dist-demo              |
-| build:lib     | Compiles the library and rewrites the absolute imports to relative ones |
-| preview       | Serves the production demo build at localhost:4173                      |
-| clean         | Removes build and coverage output                                       |
+| Script  | Purpose                                                               |
+| ------- | --------------------------------------------------------------------- |
+| start   | Serves the demo from the repository at localhost:5173                 |
+| build   | Copies the page, the demo and the library sources into dist           |
+| preview | Builds, then serves the dist folder at localhost:4173                 |
 
-The production demo is built against the compiled library in dist, exactly the way an npm
-consumer would use it. Mobile browsers block the camera on plain-HTTP network addresses, so to
-test on a phone during development, serve the page over HTTPS, for example through a tunnel.
+Only Node.js is needed to run the scripts. Mobile browsers block the camera on plain-HTTP network
+addresses, so to test on a phone during development, serve the page over HTTPS, for example
+through a tunnel.
 
 ## Deployment
 
 The demo is deployed on Vercel at
-[code39scanner.vercel.app](https://code39scanner.vercel.app/). The Vercel configuration installs
-dependencies with a clean install, runs the full build, and publishes the dist-demo folder.
+[code39scanner.vercel.app](https://code39scanner.vercel.app/). The Vercel configuration runs the
+build script, which assembles the static site, and publishes the dist folder.
 Every page is served with these security headers:
 
 | Header                 | Value                                                          |
@@ -277,8 +272,6 @@ Every page is served with these security headers:
 | X-Content-Type-Options | nosniff                                                        |
 | X-Frame-Options        | DENY                                                           |
 | Referrer-Policy        | strict-origin-when-cross-origin                                |
-
-Built assets have content-hashed names and are cached for one year.
 
 To deploy a copy, import the repository in Vercel as a new project and keep the detected
 settings.

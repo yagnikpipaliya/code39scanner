@@ -2,9 +2,9 @@
  * Demo view components. Each one is a pure view: it reports user intent through callbacks and
  * renders whatever state it is given.
  *
- * @typedef {import('code39-scanner').ScannerState} ScannerStateValue
- * @typedef {import('code39-scanner').CameraDevice} CameraDevice
- * @typedef {import('@demo/results-store.js').StoredResult} StoredResult
+ * @typedef {import('../src/camera/scanner.js').ScannerStateValue} ScannerStateValue
+ * @typedef {import('../src/camera/camera-frame-source.js').CameraDevice} CameraDevice
+ * @typedef {import('./results-store.js').StoredResult} StoredResult
  */
 import { ScannerState } from 'code39-scanner';
 

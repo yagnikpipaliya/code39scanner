@@ -14,8 +14,8 @@ export const START_STOP_CHARACTER = '*';
 /** All data characters of standard Code 39, in check-value order, followed by the start/stop. */
 export const CODE39_ALPHABET = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ-. $/+%*';
 
-// prettier-ignore
-const PATTERN_MASKS: readonly number[] = [
+/** @type {readonly number[]} */
+const PATTERN_MASKS = [
   0x034, 0x121, 0x061, 0x160, 0x031, 0x130, 0x070, 0x025, 0x124, 0x064, // 0-9
   0x109, 0x049, 0x148, 0x019, 0x118, 0x058, 0x00d, 0x10c, 0x04c, 0x01c, // A-J
   0x103, 0x043, 0x142, 0x013, 0x112, 0x052, 0x007, 0x106, 0x046, 0x016, // K-T
@@ -24,18 +24,27 @@ const PATTERN_MASKS: readonly number[] = [
   0x094,                                                                // *
 ];
 
-const entries = [...CODE39_ALPHABET].map((char, index) => [char, PATTERN_MASKS[index]!] as const);
+const entries = [...CODE39_ALPHABET].map((char, index) => [char, PATTERN_MASKS[index]]);
 
-/** Character → 9-bit wide/narrow mask. */
-export const CHAR_TO_PATTERN: ReadonlyMap<string, number> = new Map(entries);
+/**
+ * Character → 9-bit wide/narrow mask.
+ * @type {ReadonlyMap<string, number>}
+ */
+export const CHAR_TO_PATTERN = new Map(entries);
 
-/** 9-bit wide/narrow mask → character. */
-export const PATTERN_TO_CHAR: ReadonlyMap<number, string> = new Map(
-  entries.map(([char, mask]) => [mask, char]),
-);
+/**
+ * 9-bit wide/narrow mask → character.
+ * @type {ReadonlyMap<number, string>}
+ */
+export const PATTERN_TO_CHAR = new Map(entries.map(([char, mask]) => [mask, char]));
 
-/** Whether element `index` (0 = first bar) of `mask` is wide. */
-export function isWideElement(mask: number, index: number): boolean {
+/**
+ * Whether element `index` (0 = first bar) of `mask` is wide.
+ * @param {number} mask
+ * @param {number} index
+ * @returns {boolean}
+ */
+export function isWideElement(mask, index) {
   return ((mask >> (ELEMENTS_PER_CHARACTER - 1 - index)) & 1) === 1;
 }
 
@@ -47,12 +56,16 @@ export function isWideElement(mask: number, index: number): boolean {
 const A = 'A'.charCodeAt(0);
 const Z = 'Z'.charCodeAt(0);
 
-type PairDecoder = (letter: number) => number | null;
-
-const inRange = (letter: number, from: string, to: string): boolean =>
+/**
+ * @param {number} letter
+ * @param {string} from
+ * @param {string} to
+ */
+const inRange = (letter, from, to) =>
   letter >= from.charCodeAt(0) && letter <= to.charCodeAt(0);
 
-const PAIR_DECODERS: Readonly<Record<string, PairDecoder>> = {
+/** @type {Readonly<Record<string, (letter: number) => number | null>>} */
+const PAIR_DECODERS = {
   // +A..+Z → a..z
   '+': (letter) => (inRange(letter, 'A', 'Z') ? letter + 32 : null),
   // $A..$Z → control characters 1..26
@@ -78,11 +91,13 @@ const PAIR_DECODERS: Readonly<Record<string, PairDecoder>> = {
 /**
  * Expands a raw Code 39 payload using Full ASCII rules.
  * Returns `null` when the payload contains an invalid shift sequence.
+ * @param {string} raw
+ * @returns {string | null}
  */
-export function expandFullAscii(raw: string): string | null {
+export function expandFullAscii(raw) {
   let text = '';
   for (let i = 0; i < raw.length; i++) {
-    const char = raw[i]!;
+    const char = raw[i];
     const decodePair = PAIR_DECODERS[char];
     if (!decodePair) {
       text += char;

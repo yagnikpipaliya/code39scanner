@@ -20,27 +20,38 @@ const LIGHT_PERCENTILE = 0.98;
 const WINDOW_RADIUS_FRACTION = 1 / 16;
 const MIN_WINDOW_RADIUS = 8;
 
-/** [1 2 1] / 4 smoothing with clamped borders. */
-function smooth(samples: ArrayLike<number>): Float32Array {
+/**
+ * [1 2 1] / 4 smoothing with clamped borders.
+ * @param {ArrayLike<number>} samples
+ * @returns {Float32Array}
+ */
+function smooth(samples) {
   const n = samples.length;
   const out = new Float32Array(n);
   for (let x = 0; x < n; x++) {
-    const left = samples[Math.max(0, x - 1)]!;
-    const right = samples[Math.min(n - 1, x + 1)]!;
-    out[x] = (left + 2 * samples[x]! + right) / 4;
+    const left = samples[Math.max(0, x - 1)];
+    const right = samples[Math.min(n - 1, x + 1)];
+    out[x] = (left + 2 * samples[x] + right) / 4;
   }
   return out;
 }
 
-/** Luminance values at the given percentiles, via a 256-bin histogram. */
-function percentiles(values: Float32Array, low: number, high: number): [number, number] {
+/**
+ * Luminance values at the given percentiles, via a 256-bin histogram.
+ * @param {Float32Array} values
+ * @param {number} low
+ * @param {number} high
+ * @returns {[number, number]}
+ */
+function percentiles(values, low, high) {
   const histogram = new Uint32Array(256);
-  for (const v of values) histogram[Math.min(255, Math.max(0, Math.round(v)))]!++;
-  const find = (fraction: number): number => {
+  for (const v of values) histogram[Math.min(255, Math.max(0, Math.round(v)))]++;
+  /** @param {number} fraction */
+  const find = (fraction) => {
     const target = fraction * values.length;
     let cumulative = 0;
     for (let level = 0; level < 256; level++) {
-      cumulative += histogram[level]!;
+      cumulative += histogram[level];
       if (cumulative > target) return level;
     }
     return 255;
@@ -48,12 +59,14 @@ function percentiles(values: Float32Array, low: number, high: number): [number, 
   return [find(low), find(high)];
 }
 
-/** Sliding-window extreme in O(n) using a monotonic deque. */
-function slidingExtreme(
-  values: Float32Array,
-  radius: number,
-  keeps: (candidate: number, incoming: number) => boolean,
-): Float32Array {
+/**
+ * Sliding-window extreme in O(n) using a monotonic deque.
+ * @param {Float32Array} values
+ * @param {number} radius
+ * @param {(candidate: number, incoming: number) => boolean} keeps
+ * @returns {Float32Array}
+ */
+function slidingExtreme(values, radius, keeps) {
   const n = values.length;
   const out = new Float32Array(n);
   const deque = new Int32Array(n);
@@ -62,11 +75,11 @@ function slidingExtreme(
   let next = 0;
   for (let x = 0; x < n; x++) {
     for (const last = Math.min(n - 1, x + radius); next <= last; next++) {
-      while (tail > head && !keeps(values[deque[tail - 1]!]!, values[next]!)) tail--;
+      while (tail > head && !keeps(values[deque[tail - 1]], values[next])) tail--;
       deque[tail++] = next;
     }
-    while (deque[head]! < x - radius) head++;
-    out[x] = values[deque[head]!]!;
+    while (deque[head] < x - radius) head++;
+    out[x] = values[deque[head]];
   }
   return out;
 }
@@ -74,8 +87,10 @@ function slidingExtreme(
 /**
  * Returns run-lengths alternating light/dark, starting and ending with a light run
  * (possibly 0 wide), or `null` if the line has no usable contrast.
+ * @param {ArrayLike<number>} samples
+ * @returns {number[] | null}
  */
-export function binarizeLine(samples: ArrayLike<number>): number[] | null {
+export function binarizeLine(samples) {
   const n = samples.length;
   if (n < 3) return null;
 
@@ -91,19 +106,20 @@ export function binarizeLine(samples: ArrayLike<number>): number[] | null {
   // Signed distance from the threshold: >= 0 is light, < 0 is dark.
   const distance = new Float32Array(n);
   for (let x = 0; x < n; x++) {
-    const min = localMin[x]!;
-    const max = localMax[x]!;
-    distance[x] = max - min >= minLocalContrast ? signal[x]! - (min + max) / 2 : 1;
+    const min = localMin[x];
+    const max = localMax[x];
+    distance[x] = max - min >= minLocalContrast ? signal[x] - (min + max) / 2 : 1;
   }
 
   // Positions are in pixel-edge coordinates: the line spans [0, n] and sample `x` sits at the
   // center of pixel `x`, i.e. at `x + 0.5`.
-  const runs: number[] = [];
-  if (distance[0]! < 0) runs.push(0);
+  /** @type {number[]} */
+  const runs = [];
+  if (distance[0] < 0) runs.push(0);
   let lastEdge = 0;
   for (let x = 0; x < n - 1; x++) {
-    const a = distance[x]!;
-    const b = distance[x + 1]!;
+    const a = distance[x];
+    const b = distance[x + 1];
     if (a >= 0 !== b >= 0) {
       const edge = x + 0.5 + a / (a - b);
       runs.push(edge - lastEdge);
