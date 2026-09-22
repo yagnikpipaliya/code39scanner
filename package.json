@@ -1,7 +1,7 @@
 {
   "name": "code39-scanner",
   "version": "1.0.0",
-  "description": "Zero-dependency Code 39 barcode scanner for the browser (camera + image decoding), written in plain JavaScript.",
+  "description": "Zero-dependency Code 39 barcode decoder for the browser, in a single plain-JavaScript file.",
   "keywords": [
     "barcode",
     "code39",
@@ -13,9 +13,9 @@
   "homepage": "https://code39scanner.vercel.app/",
   "license": "MIT",
   "type": "module",
-  "main": "./src/index.js",
+  "main": "./src/code39-scanner.js",
   "exports": {
-    ".": "./src/index.js",
+    ".": "./src/code39-scanner.js",
     "./package.json": "./package.json"
   },
   "files": [

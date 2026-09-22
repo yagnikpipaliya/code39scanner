@@ -2,11 +2,11 @@
  * Demo view components. Each one is a pure view: it reports user intent through callbacks and
  * renders whatever state it is given.
  *
- * @typedef {import('../src/camera/scanner.js').ScannerStateValue} ScannerStateValue
- * @typedef {import('../src/camera/camera-frame-source.js').CameraDevice} CameraDevice
+ * @typedef {typeof ScannerState[keyof typeof ScannerState]} ScannerStateValue
+ * @typedef {{ deviceId: string, label: string }} CameraDevice
  * @typedef {import('./results-store.js').StoredResult} StoredResult
  */
-import { ScannerState } from '../src/index.js';
+import { ScannerState } from './camera.js';
 
 /**
  * Returns the first element matching `selector`, verifying its type at runtime (not just casting).
@@ -64,8 +64,6 @@ export const StatusTone = Object.freeze(
 export class StatusBanner {
   /** @type {HTMLElement} */
   #element;
-  /** @type {ReturnType<typeof setTimeout> | undefined} */
-  #hideTimer;
 
   /** @param {HTMLElement} element */
   constructor(element) {
@@ -75,7 +73,6 @@ export class StatusBanner {
   /** Shows a message until it is replaced or hidden. */
   /** @param {string} message @param {StatusToneValue} [tone] */
   show(message, tone = StatusTone.Info) {
-    clearTimeout(this.#hideTimer);
     this.#element.textContent = message;
     for (const value of Object.values(StatusTone)) {
       this.#element.classList.toggle(`status--${value}`, value === tone);
@@ -83,15 +80,7 @@ export class StatusBanner {
     this.#element.hidden = false;
   }
 
-  /** Shows a message that hides itself after `durationMs`. */
-  /** @param {string} message @param {StatusToneValue} tone @param {number} durationMs */
-  flash(message, tone, durationMs) {
-    this.show(message, tone);
-    this.#hideTimer = setTimeout(() => this.hide(), durationMs);
-  }
-
   hide() {
-    clearTimeout(this.#hideTimer);
     this.#element.hidden = true;
     this.#element.textContent = '';
   }
