@@ -1,59 +1,47 @@
 /**
- * Demo composition root: wires the scanner package to the page. All logic lives in the
- * package, the results store and the view components imported below.
+ * Demo composition root: wires the camera scanner to the page. All logic lives in the decoder,
+ * the camera module, the results store and the view components imported below.
  */
-import {
-  Code39Scanner,
-  Code39ScannerError,
-  ErrorCode,
-  ScannerEvent,
-  ScannerState,
-} from '../src/index.js';
+import { Code39Scanner, ScannerState } from './camera.js';
 import { ResultsStore } from './results-store.js';
 import { CameraControls, requireElement, ResultsList, StatusBanner, StatusTone } from './ui.js';
 
 const DETECTED_HIGHLIGHT_MS = 400;
-const TRANSIENT_MESSAGE_MS = 4000;
+
+const PERMISSION_MESSAGE =
+  'Camera permission was denied. Allow camera access in your browser settings, then try again.';
+const NO_CAMERA_MESSAGE = 'No camera was found. Connect a camera and try again.';
+const CAMERA_BUSY_MESSAGE =
+  'The camera is in use by another application. Close it and try again.';
+const INSECURE_MESSAGE =
+  'The camera is only available over HTTPS. Open this page using an https:// address.';
+const UNSUPPORTED_MESSAGE =
+  'This browser does not support camera access. Try a recent Chrome, Safari, Firefox or Edge.';
 
 /**
- * User-facing explanation per error code, built from the error's own message; codes without an
- * entry show that message unchanged.
+ * User-facing explanation per camera failure. Browsers report these as a DOMException whose
+ * `name` says what went wrong; anything else falls back to the error's own message.
  *
- * @type {Readonly<Partial<Record<string, (message: string) => string>>>}
+ * @type {Readonly<Record<string, string>>}
  */
 const ERROR_MESSAGES = Object.freeze({
-  [ErrorCode.PermissionDenied]: () =>
-    'Camera permission was denied. Allow camera access in your browser settings, then try again.',
-  [ErrorCode.InsecureContext]: () =>
-    'The camera is only available over HTTPS. Open this page using an https:// address.',
-  [ErrorCode.UnsupportedBrowser]: () =>
-    'This browser does not support camera access. Try a recent Chrome, Safari, Firefox or Edge.',
-  [ErrorCode.CameraUnavailable]: (message) =>
-    `${message} Check that a camera is connected and not in use by another app.`,
+  NotAllowedError: PERMISSION_MESSAGE,
+  SecurityError: PERMISSION_MESSAGE,
+  NotFoundError: NO_CAMERA_MESSAGE,
+  OverconstrainedError: NO_CAMERA_MESSAGE,
+  NotReadableError: CAMERA_BUSY_MESSAGE,
+  AbortError: CAMERA_BUSY_MESSAGE,
 });
-
-/**
- * @param {string} code An `ErrorCode` value.
- * @param {string} message
- * @returns {string}
- */
-const messageFor = (code, message) => ERROR_MESSAGES[code]?.(message) ?? message;
 
 /** @param {unknown} error @returns {string} */
 function describeError(error) {
-  if (error instanceof Code39ScannerError) return messageFor(error.code, error.message);
-  return error instanceof Error ? error.message : 'Something went wrong.';
+  const { name, message } = /** @type {{ name?: string, message?: string }} */ (error ?? {});
+  return (name && ERROR_MESSAGES[name]) || message || 'Something went wrong.';
 }
-
-/** A start cancelled by a later stop (e.g. the page was hidden) is expected, not a failure. */
-/** @param {unknown} error */
-const isCancellation = (error) =>
-  error instanceof Code39ScannerError && error.code === ErrorCode.OperationCancelled;
 
 const viewer = requireElement('#viewer', HTMLElement);
 const status = new StatusBanner(requireElement('#status', HTMLElement));
 const store = new ResultsStore();
-const scanner = new Code39Scanner({ video: requireElement('#preview', HTMLVideoElement) });
 
 const resultsList = new ResultsList({
   list: requireElement('#results-list', HTMLOListElement),
@@ -72,26 +60,34 @@ const controls = new CameraControls({
   onCameraChange: (deviceId) => void start(deviceId),
 });
 
+const scanner = new Code39Scanner({
+  video: requireElement('#preview', HTMLVideoElement),
+  onDetect: (result) => {
+    store.add(result);
+    highlightDetection();
+  },
+  onChange: (state) => controls.setState(state),
+  onError: (error) => {
+    controls.resetCameras();
+    status.show(describeError(error), StatusTone.Error);
+  },
+});
+
 /** @param {string} [deviceId] */
 async function start(deviceId) {
   status.hide();
-  try {
-    await scanner.start({ deviceId });
-  } catch (error) {
-    controls.resetCameras();
-    if (!isCancellation(error)) status.show(describeError(error), StatusTone.Error);
-    return;
-  }
-  await refreshCameraList();
+  await scanner.start(deviceId);
+  // A start that failed or was cancelled has already reset the controls.
+  if (scanner.state === ScannerState.Scanning) await refreshCameraList();
 }
 
 /** The camera is already running; if listing fails, the picker just shows the default entry. */
 async function refreshCameraList() {
   try {
-    controls.setCameras(await Code39Scanner.listCameras(), scanner.activeDeviceId);
+    controls.setCameras(await Code39Scanner.listCameras(), scanner.deviceId);
   } catch (error) {
     console.warn('Unable to list cameras.', error);
-    controls.setCameras([], scanner.activeDeviceId);
+    controls.setCameras([], scanner.deviceId);
   }
 }
 
@@ -107,30 +103,20 @@ function highlightDetection() {
 }
 
 store.subscribe((results) => resultsList.render(results));
-scanner.on(ScannerEvent.StateChange, (state) => controls.setState(state));
-scanner.on(ScannerEvent.Error, (error) => {
-  // Still scanning means the error was recoverable (e.g. one bad frame): show it briefly.
-  if (scanner.state === ScannerState.Scanning) {
-    status.flash(describeError(error), StatusTone.Warning, TRANSIENT_MESSAGE_MS);
-  } else {
-    status.show(describeError(error), StatusTone.Error);
-  }
-});
-scanner.on(ScannerEvent.Detect, (result) => {
-  store.add(result);
-  highlightDetection();
-});
-
 controls.setState(scanner.state);
+
 const environmentError = !window.isSecureContext
-  ? ErrorCode.InsecureContext
+  ? INSECURE_MESSAGE
   : !Code39Scanner.isSupported()
-    ? ErrorCode.UnsupportedBrowser
+    ? UNSUPPORTED_MESSAGE
     : null;
 if (environmentError) {
-  status.show(messageFor(environmentError, ''), StatusTone.Error);
+  status.show(environmentError, StatusTone.Error);
   controls.disable();
 }
 
-// Release the camera when the page is hidden for good (tab closed, navigation, bfcache).
-window.addEventListener('pagehide', () => void scanner.stop());
+// Release the camera when the page is hidden or closed (tab switch, navigation, bfcache).
+window.addEventListener('pagehide', () => scanner.stop());
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) scanner.stop();
+});
